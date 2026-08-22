@@ -18,3 +18,12 @@ request another user's team.
 `cycleo_get_team` calls `GET /teams/{teamId}` for a positive numeric team ID.
 The Cycleo API restricts the result to active, visible teams in the
 authenticated user's league and returns `team_not_found` otherwise.
+
+## TransferAI
+
+`cycleo_get_transfer_advice` calls the account-gated
+`GET /races/{raceId}/transfer-advice` route. It accepts a required positive
+`raceId`, an optional `limit` from 1 through 50, and optional `includeOwned`
+and `allowStarted` booleans. Omitted options preserve the API defaults. The
+Cycleo API continues to enforce race visibility, league scoping, and the
+account's TransferAI entitlement.

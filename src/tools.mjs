@@ -9,6 +9,7 @@ export const TOOL_DEFINITIONS = [
   { name: 'cycleo_get_overview', description: 'Get the authenticated Cycleo front-page overview.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'cycleo_list_races', description: 'List visible Cycleo races with optional paging.', inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, page: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_race', description: 'Get a visible Cycleo race and its read-only overview.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+  { name: 'cycleo_get_transfer_advice', description: 'Get account-gated TransferAI advice for a visible Cycleo race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, includeOwned: { type: 'boolean', default: false }, allowStarted: { type: 'boolean', default: false } }, additionalProperties: false } },
   { name: 'cycleo_search_riders', description: 'Search visible Cycleo riders.', inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string', minLength: 1, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT } }, additionalProperties: false } },
   { name: 'cycleo_get_rider', description: 'Get a visible Cycleo rider profile.', inputSchema: { type: 'object', required: ['riderId'], properties: { riderId: { type: 'integer', minimum: 1 } }, additionalProperties: false } }
 ];
@@ -28,6 +29,11 @@ export async function callTool(name, args, { api, token, user }) {
     case 'cycleo_get_overview': return text(await api.get('/today', token));
     case 'cycleo_list_races': return text(await api.get('/races', token, { page: integer(args.page), limit: limit(args.limit) }));
     case 'cycleo_get_race': return text(await api.get(`/races/${integer(args.raceId)}/overview`, token));
+    case 'cycleo_get_transfer_advice': return text(await api.get(`/races/${integer(args.raceId)}/transfer-advice`, token, {
+      limit: args.limit === undefined ? undefined : limit(args.limit),
+      include_owned: args.includeOwned === true ? 1 : undefined,
+      allow_started: args.allowStarted === true ? 1 : undefined
+    }));
     case 'cycleo_search_riders': return text(await api.get('/search', token, { q: String(args.query).trim(), limit: limit(args.limit) }));
     case 'cycleo_get_rider': return text(await api.get(`/riders/${integer(args.riderId)}`, token));
     default: throw Object.assign(new Error(`Unknown tool: ${name}`), { code: 'unknown_tool' });

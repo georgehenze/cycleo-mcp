@@ -14,6 +14,19 @@ test('tool handlers only call allow-listed GET routes', async () => {
   await callTool('cycleo_get_team', { teamId: 42 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_overview', {}, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_list_races', { limit: 999 }, { api, token: 't', user: { id: 1 } });
-  assert.deepEqual(calls.map((call) => call.path), ['/team', '/teams/42', '/today', '/races']);
+  await callTool('cycleo_get_transfer_advice', { raceId: 2981, limit: 12, includeOwned: true, allowStarted: true }, { api, token: 't', user: { id: 1 } });
+  assert.deepEqual(calls.map((call) => call.path), ['/team', '/teams/42', '/today', '/races', '/races/2981/transfer-advice']);
   assert.equal(calls[3].query.limit, 50);
+  assert.deepEqual(calls[4].query, { limit: 12, include_owned: 1, allow_started: 1 });
+});
+
+test('TransferAI preserves API defaults when optional arguments are omitted', async () => {
+  const calls = [];
+  const api = { get: async (path, token, query) => { calls.push({ path, token, query }); return { path }; } };
+  await callTool('cycleo_get_transfer_advice', { raceId: 2981 }, { api, token: 't', user: { id: 1 } });
+  assert.deepEqual(calls[0], {
+    path: '/races/2981/transfer-advice',
+    token: 't',
+    query: { limit: undefined, include_owned: undefined, allow_started: undefined }
+  });
 });
