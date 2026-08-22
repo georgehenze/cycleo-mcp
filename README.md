@@ -8,6 +8,10 @@ This repository contains the MCP resource server only. Cycleo remains the
 authorization server and data owner; the `/oauth/*` integration is documented
 in `docs/auth-integration.md` and must be wired before production use.
 
+Cycleo users who want to connect from their own computer should follow the
+[workstation setup guide](docs/workstation-setup.md). It uses the hosted MCP
+endpoint; cloning or running this server locally is not required.
+
 ## Local run
 
 ```sh
