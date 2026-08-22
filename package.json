@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": { "node": ">=20.6" },
   "scripts": {
     "start": "node src/server.mjs",
+    "start:local": "node --env-file=.env src/server.mjs",
     "test": "node --test",
     "check": "node --check src/server.mjs && node --check src/cycleo-api.mjs && node --check src/tools.mjs"
   },

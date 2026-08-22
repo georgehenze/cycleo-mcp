@@ -6,14 +6,30 @@ import { CycleoApi, CycleoApiError } from './cycleo-api.mjs';
 import { TOOL_DEFINITIONS, callTool } from './tools.mjs';
 
 const port = Number(process.env.PORT || 8787);
+const authMode = process.env.MCP_AUTH_MODE || 'bearer';
+const listenHost = process.env.MCP_HOST || (authMode === 'local' ? '127.0.0.1' : '0.0.0.0');
 const resource = process.env.OAUTH_RESOURCE || process.env.MCP_PUBLIC_URL || `http://localhost:${port}`;
 const issuer = process.env.OAUTH_ISSUER || 'https://www.cycleo.com';
 const clientId = process.env.OAUTH_CLIENT_ID || 'local-test';
 const redirectUri = process.env.OAUTH_REDIRECT_URI || `${resource}/callback`;
 const tokenStorePath = process.env.TOKEN_STORE_PATH || `${homedir()}/.cycleo-mcp/tokens.json`;
+const oauthTimeoutMs = Number(process.env.OAUTH_TIMEOUT_MS || 10000);
+const pendingTtlMs = 5 * 60 * 1000;
+const sessionTtlMs = 60 * 60 * 1000;
+const maxPending = 100;
+const maxSessions = 1000;
+const supportedProtocolVersions = ['2025-11-25', '2025-06-18', '2025-03-26'];
+const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || new URL(resource).origin).split(',').map((origin) => origin.trim()).filter(Boolean));
 const api = new CycleoApi();
-const sessions = new Set();
+const sessions = new Map();
 const pending = new Map();
+
+if (!['bearer', 'local'].includes(authMode)) throw new Error('MCP_AUTH_MODE must be bearer or local');
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 through 65535');
+if (!Number.isFinite(oauthTimeoutMs) || oauthTimeoutMs <= 0) throw new Error('OAUTH_TIMEOUT_MS must be a positive number');
+if (authMode === 'local' && !['127.0.0.1', '::1', 'localhost'].includes(listenHost)) {
+  throw new Error('Local authentication mode must bind to a loopback host');
+}
 
 function send(response, status, body, headers = {}) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers });
@@ -23,6 +39,53 @@ function send(response, status, body, headers = {}) {
 function sendHtml(response, status, body) {
   response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
   response.end(body);
+}
+
+function sendRpcError(response, id, code, message, status = 200) {
+  return send(response, status, { jsonrpc: '2.0', id, error: { code, message } });
+}
+
+function validateOrigin(request) {
+  const origin = request.headers.origin;
+  if (origin && !allowedOrigins.has(origin)) {
+    throw Object.assign(new Error('Origin is not allowed'), { status: 403, code: 'origin_not_allowed' });
+  }
+}
+
+function validateAccept(request) {
+  const accept = (request.headers.accept || '').toLowerCase();
+  if (!accept.includes('application/json') || !accept.includes('text/event-stream')) {
+    throw Object.assign(new Error('Accept must include application/json and text/event-stream'), { status: 406, code: 'not_acceptable' });
+  }
+}
+
+function validateContentType(request) {
+  const contentType = request.headers['content-type'] || '';
+  if (!contentType.toLowerCase().startsWith('application/json')) {
+    throw Object.assign(new Error('Content-Type must be application/json'), { status: 415, code: 'unsupported_media_type' });
+  }
+}
+
+function cleanState(now = Date.now()) {
+  for (const [state, flow] of pending) {
+    if (now - flow.created > pendingTtlMs) pending.delete(state);
+  }
+  for (const [sessionId, session] of sessions) {
+    if (now - session.lastSeen > sessionTtlMs) sessions.delete(sessionId);
+  }
+}
+
+async function oauthFetch(url, options) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), oauthTimeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') throw Object.assign(new Error('OAuth request timed out'), { status: 504, code: 'oauth_timeout' });
+    throw Object.assign(new Error('OAuth server is unavailable'), { status: 502, code: 'oauth_unavailable' });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function tokenFrom(request) {
@@ -45,7 +108,7 @@ function saveTokenStore(tokens) {
 async function refreshStoredToken(tokens) {
   if (!tokens?.refresh_token) return null;
   const body = new URLSearchParams({ grant_type: 'refresh_token', client_id: clientId, refresh_token: tokens.refresh_token, resource });
-  const response = await fetch(`${issuer}/oauth/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
+  const response = await oauthFetch(`${issuer}/oauth/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
   if (!response.ok) return null;
   const next = await response.json();
   const stored = { ...tokens, ...next, obtained_at: Date.now() };
@@ -64,42 +127,87 @@ async function readJson(request) {
   let raw = '';
   for await (const chunk of request) {
     raw += chunk;
-    if (raw.length > 1024 * 1024) throw Object.assign(new Error('Request too large'), { code: 'request_too_large' });
+    if (raw.length > 1024 * 1024) throw Object.assign(new Error('Request too large'), { status: 413, code: 'request_too_large' });
   }
   return raw ? JSON.parse(raw) : {};
 }
 
 async function authenticatedUser(request) {
-  const token = tokenFrom(request) || await storedAccessToken();
+  const token = tokenFrom(request) || (authMode === 'local' ? await storedAccessToken() : null);
   if (!token) throw Object.assign(new Error('Authentication required'), { status: 401, code: 'authentication_required' });
   const user = await api.me(token);
+  if (user?.id === undefined || user?.id === null) throw new CycleoApiError('Cycleo API returned an invalid user identity');
   return { token, user };
+}
+
+function userKey(user) {
+  return `${user?.id ?? ''}:${user?.league_id ?? user?.league?.id ?? ''}`;
+}
+
+function requireSession(request, user) {
+  cleanState();
+  const sessionId = request.headers['mcp-session-id'];
+  if (typeof sessionId !== 'string') throw Object.assign(new Error('MCP-Session-Id is required'), { status: 400, code: 'missing_mcp_session' });
+  const session = sessions.get(sessionId);
+  if (!session || session.userKey !== userKey(user)) throw Object.assign(new Error('MCP session not found'), { status: 404, code: 'invalid_mcp_session' });
+  const protocolVersion = request.headers['mcp-protocol-version'];
+  if (protocolVersion && (protocolVersion !== session.protocolVersion || !supportedProtocolVersions.includes(protocolVersion))) {
+    throw Object.assign(new Error('Unsupported MCP protocol version'), { status: 400, code: 'unsupported_protocol_version' });
+  }
+  session.lastSeen = Date.now();
+  return { sessionId, session };
 }
 
 async function handleMcp(request, response) {
   const { token, user } = await authenticatedUser(request);
   const body = await readJson(request);
   const id = body.id ?? null;
-  if (body.method === 'notifications/initialized') return send(response, 202);
-  if (body.method === 'initialize') {
-    const sessionId = randomUUID();
-    sessions.add(sessionId);
-    return send(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion: body.params?.protocolVersion || '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'cycleo-mcp', version: '0.1.0' } } }, { 'mcp-session-id': sessionId });
+  if (!body || typeof body !== 'object' || Array.isArray(body) || body.jsonrpc !== '2.0' || typeof body.method !== 'string') {
+    return sendRpcError(response, id, -32600, 'Invalid Request');
   }
+  if (body.method === 'initialize') {
+    if (typeof body.params?.protocolVersion !== 'string') return sendRpcError(response, id, -32602, 'protocolVersion is required');
+    cleanState();
+    if (sessions.size >= maxSessions) throw Object.assign(new Error('Too many active MCP sessions'), { status: 503, code: 'session_capacity_reached' });
+    const protocolVersion = supportedProtocolVersions.includes(body.params.protocolVersion) ? body.params.protocolVersion : supportedProtocolVersions[0];
+    const sessionId = randomUUID();
+    sessions.set(sessionId, { userKey: userKey(user), protocolVersion, initialized: false, lastSeen: Date.now() });
+    return send(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'cycleo-mcp', version: '0.1.0' } } }, { 'mcp-session-id': sessionId });
+  }
+  const { session } = requireSession(request, user);
+  if (body.method === 'notifications/initialized') {
+    session.initialized = true;
+    return send(response, 202);
+  }
+  if (!session.initialized && body.method !== 'ping') return sendRpcError(response, id, -32002, 'MCP session is not initialized');
+  if (body.method === 'ping') return send(response, 200, { jsonrpc: '2.0', id, result: {} });
   if (body.method === 'tools/list') return send(response, 200, { jsonrpc: '2.0', id, result: { tools: TOOL_DEFINITIONS.map((tool) => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true } })) } });
   if (body.method === 'tools/call') {
-    const result = await callTool(body.params?.name, body.params?.arguments || {}, { api, token, user });
-    return send(response, 200, { jsonrpc: '2.0', id, result: { content: [result], isError: false } });
+    try {
+      const result = await callTool(body.params?.name, body.params?.arguments ?? {}, { api, token, user });
+      return send(response, 200, { jsonrpc: '2.0', id, result: { content: [result], isError: false } });
+    } catch (error) {
+      if (error.jsonRpcCode) return sendRpcError(response, id, error.jsonRpcCode, error.message);
+      if (error instanceof CycleoApiError) {
+        return send(response, 200, { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify({ error: { code: error.code, message: error.message } }) }], isError: true } });
+      }
+      throw error;
+    }
   }
-  return send(response, 200, { jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } });
+  return sendRpcError(response, id, -32601, 'Method not found');
 }
 
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
+    validateOrigin(request);
     if (url.pathname === '/healthz') return send(response, 200, { ok: true, service: 'cycleo-mcp' });
     if (url.pathname === '/.well-known/oauth-protected-resource') return send(response, 200, { resource, authorization_servers: [issuer], scopes_supported: ['cycleo:read'], resource_documentation: `${resource}/docs` });
     if (url.pathname === '/connect') {
+      if (authMode !== 'local') return send(response, 404, { error: 'not_found' });
+      if (request.method !== 'GET') return send(response, 405, { error: 'method_not_allowed' }, { allow: 'GET' });
+      cleanState();
+      if (pending.size >= maxPending) return send(response, 429, { error: 'too_many_pending_connections' });
       const verifier = randomBytes(32).toString('base64url');
       const state = randomBytes(24).toString('base64url');
       const challenge = createHash('sha256').update(verifier).digest('base64url');
@@ -110,7 +218,11 @@ const server = createServer(async (request, response) => {
       return response.end();
     }
     if (url.pathname === '/callback') {
+      if (authMode !== 'local') return send(response, 404, { error: 'not_found' });
+      if (request.method !== 'GET') return send(response, 405, { error: 'method_not_allowed' }, { allow: 'GET' });
+      cleanState();
       if (url.searchParams.get('error')) {
+        pending.delete(url.searchParams.get('state'));
         return sendHtml(response, 400, '<!doctype html><meta charset="utf-8"><title>Cycleo verbinding mislukt</title><h1>Verbinding mislukt</h1><p>De Cycleo-toegang is niet verleend. Je kunt dit venster sluiten.</p>');
       }
       if (!url.searchParams.get('code') || !url.searchParams.get('state')) {
@@ -118,24 +230,37 @@ const server = createServer(async (request, response) => {
       }
       const state = url.searchParams.get('state');
       const flow = pending.get(state);
-      if (!flow || Date.now() - flow.created > 5 * 60 * 1000) return sendHtml(response, 400, '<!doctype html><meta charset="utf-8"><title>Verbinding verlopen</title><h1>Verbinding verlopen</h1><p>Start de verbinding opnieuw.</p>');
+      if (!flow) return sendHtml(response, 400, '<!doctype html><meta charset="utf-8"><title>Verbinding verlopen</title><h1>Verbinding verlopen</h1><p>Start de verbinding opnieuw.</p>');
       pending.delete(state);
       const body = new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId, code: url.searchParams.get('code'), redirect_uri: redirectUri, resource, code_verifier: flow.verifier });
-      const tokenResponse = await fetch(`${issuer}/oauth/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
+      const tokenResponse = await oauthFetch(`${issuer}/oauth/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
       if (!tokenResponse.ok) return sendHtml(response, 400, '<!doctype html><meta charset="utf-8"><title>Verbinding mislukt</title><h1>Verbinding mislukt</h1><p>De tokenuitwisseling is mislukt.</p>');
       const tokens = { ...(await tokenResponse.json()), obtained_at: Date.now() };
       saveTokenStore(tokens);
       return sendHtml(response, 200, '<!doctype html><meta charset="utf-8"><title>Cycleo verbonden</title><h1>Cycleo verbonden</h1><p>Je read-only Cycleo-verbinding is opgeslagen. Je kunt dit venster sluiten.</p>');
     }
     if (url.pathname !== '/mcp') return send(response, 404, { error: 'not_found' });
-    if (request.method !== 'POST') return send(response, 405, { error: 'method_not_allowed' }, { allow: 'POST' });
+    if (request.method === 'DELETE') {
+      const { user } = await authenticatedUser(request);
+      const { sessionId } = requireSession(request, user);
+      sessions.delete(sessionId);
+      return send(response, 204);
+    }
+    if (request.method !== 'POST') return send(response, 405, { error: 'method_not_allowed' }, { allow: 'POST, DELETE' });
+    validateAccept(request);
+    validateContentType(request);
     return await handleMcp(request, response);
   } catch (error) {
     const status = error.status || (error instanceof SyntaxError ? 400 : 500);
+    if (error instanceof SyntaxError) return sendRpcError(response, null, -32700, 'Parse error', 400);
     if (status === 401) return send(response, 401, { error: { code: error.code, message: error.message } }, { 'www-authenticate': `Bearer resource_metadata="${resource}/.well-known/oauth-protected-resource", scope="cycleo:read"` });
     if (error instanceof CycleoApiError) return send(response, status, { error: { code: error.code, message: error.message } });
     return send(response, status, { error: { code: error.code || 'server_error', message: status === 500 ? 'Internal server error' : error.message } });
   }
 });
 
-server.listen(port, () => console.log(`Cycleo MCP listening on ${port}`));
+if (process.env.NODE_ENV !== 'test') {
+  server.listen(port, listenHost, () => console.log(`Cycleo MCP listening on ${listenHost}:${port} (${authMode} auth)`));
+}
+
+export { server };

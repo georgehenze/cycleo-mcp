@@ -14,5 +14,9 @@ The authorization result must bind the OAuth session to one Cycleo user and
 league. The MCP service validates the resulting bearer token by calling
 `GET /auth/me` before exposing tools. No password is sent to this repository.
 
+In production (`MCP_AUTH_MODE=bearer`), the client supplies its bearer token on
+every request. The local stored-token flow is disabled. `MCP_AUTH_MODE=local`
+exists only for a single-user workstation and is enforced as loopback-only.
+
 Production should use exact registered redirect URIs, issuer/resource checks,
 single-use authorization codes and refresh-token reuse detection.

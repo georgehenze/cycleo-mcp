@@ -7,6 +7,9 @@ tool.
 
 The initial tool set is intentionally small. Add a tool only when its API
 route, user/league scoping and response-size limits are documented and tested.
+The server validates every call against the published input schema before any
+API request is dispatched; invalid, missing and additional arguments produce a
+JSON-RPC `-32602` error.
 
 ## Current team
 

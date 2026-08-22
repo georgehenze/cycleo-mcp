@@ -13,11 +13,20 @@ test('tool handlers only call allow-listed GET routes', async () => {
   await callTool('cycleo_get_my_team', {}, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_team', { teamId: 42 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_overview', {}, { api, token: 't', user: { id: 1 } });
-  await callTool('cycleo_list_races', { limit: 999 }, { api, token: 't', user: { id: 1 } });
+  await callTool('cycleo_list_races', { limit: 50 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_transfer_advice', { raceId: 2981, limit: 12, includeOwned: true, allowStarted: true }, { api, token: 't', user: { id: 1 } });
   assert.deepEqual(calls.map((call) => call.path), ['/team', '/teams/42', '/today', '/races', '/races/2981/transfer-advice']);
   assert.equal(calls[3].query.limit, 50);
   assert.deepEqual(calls[4].query, { limit: 12, include_owned: 1, allow_started: 1 });
+});
+
+test('tool handlers reject arguments outside their published schemas', async () => {
+  const context = { api: { get: async () => assert.fail('invalid calls must not reach the API') }, token: 't', user: { id: 1 } };
+  await assert.rejects(callTool('cycleo_get_team', {}, context), { code: 'invalid_params' });
+  await assert.rejects(callTool('cycleo_get_team', { teamId: '42' }, context), { code: 'invalid_params' });
+  await assert.rejects(callTool('cycleo_list_races', { limit: 51 }, context), { code: 'invalid_params' });
+  await assert.rejects(callTool('cycleo_search_riders', { query: '   ' }, context), { code: 'invalid_params' });
+  await assert.rejects(callTool('cycleo_get_my_team', { unexpected: true }, context), { code: 'invalid_params' });
 });
 
 test('TransferAI preserves API defaults when optional arguments are omitted', async () => {

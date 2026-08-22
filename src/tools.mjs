@@ -2,6 +2,10 @@ const MAX_LIMIT = 50;
 
 const text = (value) => ({ type: 'text', text: JSON.stringify(value) });
 
+function invalidArguments(message) {
+  return Object.assign(new Error(message), { code: 'invalid_params', jsonRpcCode: -32602 });
+}
+
 export const TOOL_DEFINITIONS = [
   { name: 'cycleo_get_my_context', description: 'Get the authenticated Cycleo user, team and league context.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'cycleo_get_my_team', description: 'Get the authenticated Cycleo user\'s current team roster.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
@@ -21,7 +25,36 @@ function integer(value, fallback = 1) {
 
 function limit(value) { return Math.min(MAX_LIMIT, integer(value, 20)); }
 
+export function validateToolArguments(name, args) {
+  const tool = TOOL_DEFINITIONS.find((definition) => definition.name === name);
+  if (!tool) throw Object.assign(new Error(`Unknown tool: ${name}`), { code: 'unknown_tool', jsonRpcCode: -32602 });
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw invalidArguments('Tool arguments must be an object');
+
+  const schema = tool.inputSchema;
+  for (const required of schema.required || []) {
+    if (!Object.hasOwn(args, required)) throw invalidArguments(`Missing required argument: ${required}`);
+  }
+  if (schema.additionalProperties === false) {
+    for (const key of Object.keys(args)) {
+      if (!Object.hasOwn(schema.properties, key)) throw invalidArguments(`Unknown argument: ${key}`);
+    }
+  }
+  for (const [key, value] of Object.entries(args)) {
+    const property = schema.properties[key];
+    if (!property) continue;
+    if (property.type === 'integer' && !Number.isInteger(value)) throw invalidArguments(`${key} must be an integer`);
+    if (property.type === 'string' && typeof value !== 'string') throw invalidArguments(`${key} must be a string`);
+    if (property.type === 'boolean' && typeof value !== 'boolean') throw invalidArguments(`${key} must be a boolean`);
+    if (property.minimum !== undefined && value < property.minimum) throw invalidArguments(`${key} must be at least ${property.minimum}`);
+    if (property.maximum !== undefined && value > property.maximum) throw invalidArguments(`${key} must be at most ${property.maximum}`);
+    if (property.minLength !== undefined && value.trim().length < property.minLength) throw invalidArguments(`${key} must not be empty`);
+    if (property.maxLength !== undefined && value.length > property.maxLength) throw invalidArguments(`${key} is too long`);
+  }
+  return args;
+}
+
 export async function callTool(name, args, { api, token, user }) {
+  validateToolArguments(name, args);
   switch (name) {
     case 'cycleo_get_my_context': return text(user);
     case 'cycleo_get_my_team': return text(await api.get('/team', token));
@@ -36,6 +69,6 @@ export async function callTool(name, args, { api, token, user }) {
     }));
     case 'cycleo_search_riders': return text(await api.get('/search', token, { q: String(args.query).trim(), limit: limit(args.limit) }));
     case 'cycleo_get_rider': return text(await api.get(`/riders/${integer(args.riderId)}`, token));
-    default: throw Object.assign(new Error(`Unknown tool: ${name}`), { code: 'unknown_tool' });
+    default: throw Object.assign(new Error(`Unknown tool: ${name}`), { code: 'unknown_tool', jsonRpcCode: -32602 });
   }
 }
