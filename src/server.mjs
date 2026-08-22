@@ -14,6 +14,11 @@ function send(response, status, body, headers = {}) {
   response.end(body === undefined ? '' : JSON.stringify(body));
 }
 
+function sendHtml(response, status, body) {
+  response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  response.end(body);
+}
+
 function tokenFrom(request) {
   const value = request.headers.authorization || '';
   const match = /^Bearer\s+([^\s]+)$/i.exec(value);
@@ -59,6 +64,15 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
     if (url.pathname === '/healthz') return send(response, 200, { ok: true, service: 'cycleo-mcp' });
     if (url.pathname === '/.well-known/oauth-protected-resource') return send(response, 200, { resource, authorization_servers: [issuer], scopes_supported: ['cycleo:read'], resource_documentation: `${resource}/docs` });
+    if (url.pathname === '/callback') {
+      if (url.searchParams.get('error')) {
+        return sendHtml(response, 400, '<!doctype html><meta charset="utf-8"><title>Cycleo verbinding mislukt</title><h1>Verbinding mislukt</h1><p>De Cycleo-toegang is niet verleend. Je kunt dit venster sluiten.</p>');
+      }
+      if (!url.searchParams.get('code') || !url.searchParams.get('state')) {
+        return sendHtml(response, 400, '<!doctype html><meta charset="utf-8"><title>Ongeldige callback</title><h1>Ongeldige callback</h1><p>De OAuth-callback bevat geen geldige autorisatie. Je kunt dit venster sluiten.</p>');
+      }
+      return sendHtml(response, 200, '<!doctype html><meta charset="utf-8"><title>Cycleo verbonden</title><h1>Cycleo verbonden</h1><p>De read-only autorisatie is ontvangen. Je kunt dit venster sluiten.</p>');
+    }
     if (url.pathname !== '/mcp') return send(response, 404, { error: 'not_found' });
     if (request.method !== 'POST') return send(response, 405, { error: 'method_not_allowed' }, { allow: 'POST' });
     return await handleMcp(request, response);
