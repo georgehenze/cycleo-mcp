@@ -15,8 +15,11 @@ cp .env.example .env
 npm start
 ```
 
-The local endpoint is `http://localhost:8787/mcp`. Set `CYCLEO_API_BASE_URL` to
-a local Cycleo API when developing against a local checkout.
+The local endpoint is `http://localhost:8787/mcp`. Open
+`http://localhost:8787/connect` once to sign in through Cycleo. The server
+stores only the OAuth token set locally with restrictive file permissions and
+refreshes access tokens automatically. Set `CYCLEO_API_BASE_URL` to a local
+Cycleo API when developing against a local checkout.
 
 ## Production boundary
 
