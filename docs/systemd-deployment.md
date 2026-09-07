@@ -33,7 +33,7 @@ account needs read access to `/var/www/cycleo.mcp`; the deployment account needs
 write access to that directory and passwordless permission for only the service
 restart command.
 
-Node.js 20.6 or newer and npm must be installed on the server.
+Node.js 22 or newer and npm must be installed on the server.
 
 1. Create the `cycleo-mcp` system user if it does not already exist.
 2. Ensure the SSH deployment user owns `/var/www/cycleo.mcp` and that directories

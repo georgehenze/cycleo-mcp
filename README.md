@@ -95,7 +95,7 @@ See [`docs/resources-and-prompts.md`](docs/resources-and-prompts.md).
 ## CI/CD
 
 GitHub Actions runs syntax checks, tests and the production dependency audit on
-pushes and pull requests to `main`. CI covers Node 20.6, 22 and 24.
+pushes and pull requests to `main`. CI covers Node 22 and 24.
 
 The delivery workflow runs for version tags such as `v1.2.3` and manual
 dispatches. After re-running all checks, it deploys over SSH to
