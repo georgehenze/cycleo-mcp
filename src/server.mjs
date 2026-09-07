@@ -25,6 +25,7 @@ const maxAuthCache = 5000;
 const rateLimitPerMin = Number(process.env.RATE_LIMIT_PER_MIN ?? 120);
 const rateLimitWindowMs = 60 * 1000;
 const maxRateLimitKeys = 10000;
+const maxStreamsPerSession = 4;
 const accessLog = process.env.ACCESS_LOG !== 'off' && process.env.NODE_ENV !== 'test';
 const supportedProtocolVersions = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || new URL(resource).origin).split(',').map((origin) => origin.trim()).filter(Boolean));
@@ -252,9 +253,10 @@ async function handleMcp(request, response) {
     const protocolVersion = supportedProtocolVersions.includes(body.params.protocolVersion) ? body.params.protocolVersion : supportedProtocolVersions[0];
     const sessionId = randomUUID();
     sessions.set(sessionId, { userKey: userKey(user), protocolVersion, initialized: false, lastSeen: Date.now() });
-    return send(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion, capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'cycleo-mcp', version: '0.1.0' } } }, { 'mcp-session-id': sessionId });
+    return send(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion, capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'cycleo-mcp', version: '0.1.0' } } }, { 'mcp-session-id': sessionId, 'mcp-protocol-version': protocolVersion });
   }
   const { session } = requireSession(request, user);
+  response.setHeader('mcp-protocol-version', session.protocolVersion);
   if (body.method === 'notifications/initialized') {
     session.initialized = true;
     return send(response, 202);
@@ -310,14 +312,19 @@ async function handleMcpStream(request, response) {
   const { user } = await authenticatedUser(request);
   const { session } = requireSession(request, user);
 
+  const streams = session.streams || (session.streams = new Set());
+  if (streams.size >= maxStreamsPerSession) {
+    throw Object.assign(new Error('This MCP session already has the maximum number of open streams'), { status: 409, code: 'stream_limit_reached' });
+  }
+
   response.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-store',
+    'mcp-protocol-version': session.protocolVersion,
     connection: 'keep-alive'
   });
   response.write(': open\n\n');
 
-  const streams = session.streams || (session.streams = new Set());
   streams.add(response);
 
   const keepAlive = setInterval(() => {
@@ -350,7 +357,9 @@ const server = createServer(async (request, response) => {
       });
     }
     if (url.pathname === '/healthz') return send(response, 200, { ok: true, service: 'cycleo-mcp' });
-    if (url.pathname === '/.well-known/oauth-protected-resource') return send(response, 200, { resource, authorization_servers: [issuer], scopes_supported: ['cycleo:read'] });
+    if (url.pathname === '/.well-known/oauth-protected-resource' || url.pathname === '/.well-known/oauth-protected-resource/mcp') {
+      return send(response, 200, { resource, authorization_servers: [issuer], scopes_supported: ['cycleo:read'] });
+    }
     if (url.pathname === '/connect') {
       if (authMode !== 'local') return send(response, 404, { error: 'not_found' });
       if (request.method !== 'GET') return send(response, 405, { error: 'method_not_allowed' }, { allow: 'GET' });
@@ -390,7 +399,8 @@ const server = createServer(async (request, response) => {
     if (url.pathname !== '/mcp') return send(response, 404, { error: 'not_found' });
     if (request.method === 'DELETE') {
       const { user } = await authenticatedUser(request);
-      const { sessionId } = requireSession(request, user);
+      const { sessionId, session } = requireSession(request, user);
+      response.setHeader('mcp-protocol-version', session.protocolVersion);
       sessions.delete(sessionId);
       return send(response, 204);
     }
@@ -408,6 +418,11 @@ const server = createServer(async (request, response) => {
     return send(response, status, { error: { code: error.code || 'server_error', message: status === 500 ? 'Internal server error' : error.message } }, headers);
   }
 });
+
+// Bound how long a client may take to send a request; the SSE response stream
+// stays open regardless because requestTimeout only covers request receipt.
+server.headersTimeout = 10_000;
+server.requestTimeout = 30_000;
 
 function shutdown(signal) {
   console.log(`Cycleo MCP received ${signal}, draining connections`);

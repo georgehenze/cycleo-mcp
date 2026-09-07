@@ -60,6 +60,7 @@ test('MCP sessions are negotiated, user-bound, initialized and terminable', asyn
   assert.equal(initialized.status, 200);
   const sessionId = initialized.headers.get('mcp-session-id');
   assert.ok(sessionId);
+  assert.equal(initialized.headers.get('mcp-protocol-version'), '2025-11-25');
   assert.equal((await initialized.json()).result.protocolVersion, '2025-11-25');
 
   const missingSession = await post({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
@@ -77,6 +78,7 @@ test('MCP sessions are negotiated, user-bound, initialized and terminable', asyn
 
   const listed = await post({ jsonrpc: '2.0', id: 5, method: 'tools/list' }, { sessionId, protocolVersion: '2025-11-25' });
   assert.equal(listed.status, 200);
+  assert.equal(listed.headers.get('mcp-protocol-version'), '2025-11-25');
   assert.ok((await listed.json()).result.tools.length > 0);
 
   const deleted = await fetch(endpoint, { method: 'DELETE', headers: { authorization: 'Bearer test-token', 'mcp-session-id': sessionId, 'mcp-protocol-version': '2025-11-25' } });
@@ -148,6 +150,16 @@ test('requests with an unrecognised Host header are rejected', async () => {
   assert.equal(spoofed.body.error.code, 'host_not_allowed');
 });
 
+test('protected-resource metadata is served at the root and the /mcp-suffixed path', async () => {
+  for (const path of ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp']) {
+    const metadata = await fetch(endpoint.replace('/mcp', path));
+    assert.equal(metadata.status, 200);
+    const body = await metadata.json();
+    assert.ok(body.resource);
+    assert.deepEqual(body.scopes_supported, ['cycleo:read']);
+  }
+});
+
 test('CORS preflight and headers are served for allow-listed origins only', async () => {
   const origin = 'http://localhost:8787';
 
@@ -184,9 +196,38 @@ test('GET /mcp opens an SSE stream for an initialized session', async () => {
   assert.equal(stream.status, 200);
   assert.match(stream.headers.get('content-type') || '', /text\/event-stream/);
 
+  assert.equal(stream.headers.get('mcp-protocol-version'), '2025-11-25');
   const chunk = await stream.body.getReader().read();
   assert.match(new TextDecoder().decode(chunk.value), /: open/);
   controller.abort();
+});
+
+test('a session may not hold more than four concurrent SSE streams', async () => {
+  const initialized = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+  const sessionId = initialized.headers.get('mcp-session-id');
+  await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, { sessionId });
+
+  const openStream = () => {
+    const controller = new AbortController();
+    return fetch(endpoint, {
+      method: 'GET',
+      headers: { authorization: 'Bearer test-token', accept: 'text/event-stream', 'mcp-session-id': sessionId, 'mcp-protocol-version': '2025-11-25' },
+      signal: controller.signal
+    }).then((response) => ({ response, controller }));
+  };
+
+  const held = [];
+  for (let i = 0; i < 4; i += 1) {
+    const opened = await openStream();
+    assert.equal(opened.response.status, 200);
+    held.push(opened);
+  }
+
+  const rejected = await openStream();
+  assert.equal(rejected.response.status, 409);
+  assert.equal((await rejected.response.json()).error.code, 'stream_limit_reached');
+
+  for (const { controller } of held) controller.abort();
 });
 
 test('transport and tool validation reject unsafe requests before dispatch', async () => {

@@ -67,7 +67,14 @@ streams and drains in-flight requests before exiting.
 `/mcp` is Streamable HTTP. `POST /mcp` carries the JSON-RPC request/response
 traffic. `GET /mcp` opens the server-to-client `text/event-stream` channel for
 an initialized session (identified by the `Mcp-Session-Id` header); it is held
-open with periodic keep-alive comments. `DELETE /mcp` terminates a session.
+open with periodic keep-alive comments, and a session may hold at most four
+concurrent streams (a fifth returns `409`). `DELETE /mcp` terminates a session.
+Every session-scoped response echoes the negotiated `MCP-Protocol-Version`
+header.
+
+Protected-resource metadata (RFC 9728) is served both at
+`/.well-known/oauth-protected-resource` and at the endpoint-suffixed
+`/.well-known/oauth-protected-resource/mcp` that MCP clients probe.
 
 The MCP server never receives Cycleo passwords and never connects to the Cycleo
 database. It validates each request's identity through `GET /auth/me`, binds MCP
