@@ -37,12 +37,47 @@ must provide its own OAuth bearer token. Set `MCP_PUBLIC_URL`, `OAUTH_RESOURCE`
 and `CYCLEO_API_BASE_URL` to their HTTPS production values. `OAUTH_CLIENT_ID`,
 `OAUTH_REDIRECT_URI` and `TOKEN_STORE_PATH` are local-mode settings.
 `ALLOWED_ORIGINS` is a comma-separated allow-list for clients that send an
-`Origin` header and defaults to the public resource origin.
+`Origin` header and defaults to the public resource origin. Requests from an
+allow-listed `Origin` receive CORS response headers and `OPTIONS` preflight is
+answered, so browser-based MCP clients can connect; any other `Origin` is
+rejected with `403`. `ALLOWED_HOSTS` is the matching allow-list for the `Host`
+header (DNS-rebinding protection); it defaults to the `OAUTH_RESOURCE` host and
+always permits loopback hosts so the systemd health check keeps working.
+
+Optional hardening/performance knobs: `CYCLEO_MAX_RESPONSE_BYTES` (default
+1 MiB) caps each Cycleo API response; `AUTH_CACHE_TTL_MS` (default 30000) caches
+the `GET /auth/me` identity lookup so repeated MCP calls don't re-hit Cycleo —
+set to `0` to disable, and note a revoked token stays usable until the entry
+expires. On `SIGTERM`/`SIGINT` the server stops accepting connections, ends open
+SSE streams and drains in-flight requests before exiting.
+
+## Transport
+
+`/mcp` is Streamable HTTP. `POST /mcp` carries the JSON-RPC request/response
+traffic. `GET /mcp` opens the server-to-client `text/event-stream` channel for
+an initialized session (identified by the `Mcp-Session-Id` header); it is held
+open with periodic keep-alive comments. `DELETE /mcp` terminates a session.
 
 The MCP server never receives Cycleo passwords and never connects to the Cycleo
 database. It validates each request's identity through `GET /auth/me`, binds MCP
 sessions to that user and league, and only forwards the allow-listed read routes
-in `src/tools.mjs`.
+in `src/tools.mjs`, `src/resources.mjs` and `src/prompts.mjs`.
+
+## Capabilities
+
+The server advertises `tools`, `resources` and `prompts`.
+
+- **Tools** (`src/tools.mjs`) — the allow-listed read actions; see
+  [`docs/tools.md`](docs/tools.md).
+- **Resources** (`src/resources.mjs`) — `resources/list`, `resources/read` and
+  `resources/templates/list` expose the same user- and league-scoped Cycleo
+  data as addressable `cycleo://` URIs (`cycleo://team`, `cycleo://teams/{id}`,
+  …). Reads dispatch the same fixed GET routes as the tools.
+- **Prompts** (`src/prompts.mjs`) — `prompts/list` and `prompts/get` return
+  read-only analysis prompts (`cycleo_team_review`, `cycleo_transfer_plan`,
+  `cycleo_race_preview`) that steer a client toward the right tool calls.
+
+See [`docs/resources-and-prompts.md`](docs/resources-and-prompts.md).
 
 ## CI/CD
 

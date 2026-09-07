@@ -11,6 +11,7 @@ before(async () => {
     if (request.url === '/slow') return;
     response.writeHead(request.url === '/fail' ? 403 : 200, { 'content-type': 'application/json' });
     if (request.url === '/fail') return response.end(JSON.stringify({ error: { code: 'forbidden', message: 'Not visible' } }));
+    if (request.url === '/huge') return response.end(JSON.stringify({ data: { blob: 'x'.repeat(200000) } }));
     return response.end(JSON.stringify({ data: { url: request.url, authorization: request.headers.authorization, client: request.headers['x-cycleo-client'] } }));
   });
   await new Promise((resolve) => upstream.listen(0, '127.0.0.1', resolve));
@@ -37,4 +38,11 @@ test('Cycleo API client preserves API errors and enforces timeouts', async () =>
     return true;
   });
   await assert.rejects(client.get('/slow', 'secret'), { status: 504, code: 'cycleo_timeout' });
+});
+
+test('Cycleo API client caps oversized responses', async () => {
+  const client = new CycleoApi({ baseUrl, maxResponseBytes: 4096 });
+  await assert.rejects(client.get('/huge', 'secret'), { status: 502, code: 'cycleo_response_too_large' });
+  const ok = await client.get('/races', 'secret');
+  assert.equal(ok.url, '/races');
 });

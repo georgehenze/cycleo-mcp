@@ -14,6 +14,13 @@ switches `current` atomically, restarts the service and calls
 `http://127.0.0.1:8787/healthz`. A failed restart or health check restores the
 previous symlink and restarts the previous release.
 
+On restart systemd sends `SIGTERM`; the server stops accepting new connections,
+ends open SSE streams and lets in-flight requests finish before exiting, within
+the unit's `TimeoutStopSec=20s`. The reverse proxy in front of `127.0.0.1:8787`
+should retry idempotent reads during the brief restart window. `Host` headers
+forwarded by that proxy must be `mcp.cycleo.com` (or listed in `ALLOWED_HOSTS`);
+the loopback health check is always allowed.
+
 ## One-time server preparation
 
 The service account and SSH deployment account should be separate. The service

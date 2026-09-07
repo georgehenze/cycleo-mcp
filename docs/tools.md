@@ -11,6 +11,10 @@ The server validates every call against the published input schema before any
 API request is dispatched; invalid, missing and additional arguments produce a
 JSON-RPC `-32602` error.
 
+Every Cycleo API response is read through a byte cap (`CYCLEO_MAX_RESPONSE_BYTES`,
+default 1 MiB); an over-limit response fails with `cycleo_response_too_large`
+rather than being buffered in full.
+
 ## Current team
 
 `cycleo_get_my_team` calls the authenticated, user-scoped `GET /team` API

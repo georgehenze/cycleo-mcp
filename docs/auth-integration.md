@@ -12,7 +12,11 @@ The Cycleo repository must provide:
 
 The authorization result must bind the OAuth session to one Cycleo user and
 league. The MCP service validates the resulting bearer token by calling
-`GET /auth/me` before exposing tools. No password is sent to this repository.
+`GET /auth/me` before exposing tools, caching that identity per token for
+`AUTH_CACHE_TTL_MS` (default 30s) so repeated MCP calls do not re-hit Cycleo. A
+token revoked at the authorization server therefore keeps working until its
+cache entry expires; lower or zero the TTL if faster revocation is required. No
+password is sent to this repository.
 
 In production (`MCP_AUTH_MODE=bearer`), the client supplies its bearer token on
 every request. The local stored-token flow is disabled. `MCP_AUTH_MODE=local`

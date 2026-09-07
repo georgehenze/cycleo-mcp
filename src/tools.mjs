@@ -7,15 +7,15 @@ function invalidArguments(message) {
 }
 
 export const TOOL_DEFINITIONS = [
-  { name: 'cycleo_get_my_context', description: 'Get the authenticated Cycleo user, team and league context.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'cycleo_get_my_team', description: 'Get the authenticated Cycleo user\'s current team roster.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'cycleo_get_team', description: 'Get a visible Cycleo team and its current roster.', inputSchema: { type: 'object', required: ['teamId'], properties: { teamId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
-  { name: 'cycleo_get_overview', description: 'Get the authenticated Cycleo front-page overview.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
-  { name: 'cycleo_list_races', description: 'List visible Cycleo races with optional paging.', inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, page: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
-  { name: 'cycleo_get_race', description: 'Get a visible Cycleo race and its read-only overview.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
-  { name: 'cycleo_get_transfer_advice', description: 'Get account-gated TransferAI advice for a visible Cycleo race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, includeOwned: { type: 'boolean', default: false }, allowStarted: { type: 'boolean', default: false } }, additionalProperties: false } },
-  { name: 'cycleo_search_riders', description: 'Search visible Cycleo riders.', inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string', minLength: 1, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT } }, additionalProperties: false } },
-  { name: 'cycleo_get_rider', description: 'Get a visible Cycleo rider profile.', inputSchema: { type: 'object', required: ['riderId'], properties: { riderId: { type: 'integer', minimum: 1 } }, additionalProperties: false } }
+  { name: 'cycleo_get_my_context', title: 'My Cycleo context', description: 'Get the authenticated Cycleo user, team and league context.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'cycleo_get_my_team', title: 'My Cycleo team', description: 'Get the authenticated Cycleo user\'s current team roster.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'cycleo_get_team', title: 'Cycleo team by ID', description: 'Get a visible Cycleo team and its current roster.', inputSchema: { type: 'object', required: ['teamId'], properties: { teamId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+  { name: 'cycleo_get_overview', title: 'My Cycleo overview', description: 'Get the authenticated Cycleo front-page overview.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'cycleo_list_races', title: 'List Cycleo races', description: 'List visible Cycleo races with optional paging.', inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, page: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+  { name: 'cycleo_get_race', title: 'Cycleo race overview', description: 'Get a visible Cycleo race and its read-only overview.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+  { name: 'cycleo_get_transfer_advice', title: 'TransferAI advice', description: 'Get account-gated TransferAI advice for a visible Cycleo race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, includeOwned: { type: 'boolean', default: false }, allowStarted: { type: 'boolean', default: false } }, additionalProperties: false } },
+  { name: 'cycleo_search_riders', title: 'Search Cycleo riders', description: 'Search visible Cycleo riders.', inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string', minLength: 1, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT } }, additionalProperties: false } },
+  { name: 'cycleo_get_rider', title: 'Cycleo rider profile', description: 'Get a visible Cycleo rider profile.', inputSchema: { type: 'object', required: ['riderId'], properties: { riderId: { type: 'integer', minimum: 1 } }, additionalProperties: false } }
 ];
 
 function integer(value, fallback = 1) {

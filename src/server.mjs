@@ -4,6 +4,8 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { CycleoApi, CycleoApiError } from './cycleo-api.mjs';
 import { TOOL_DEFINITIONS, callTool } from './tools.mjs';
+import { RESOURCE_DEFINITIONS, RESOURCE_TEMPLATES, readResource } from './resources.mjs';
+import { PROMPT_DEFINITIONS, getPrompt } from './prompts.mjs';
 
 const port = Number(process.env.PORT || 8787);
 const authMode = process.env.MCP_AUTH_MODE || 'bearer';
@@ -18,15 +20,21 @@ const pendingTtlMs = 5 * 60 * 1000;
 const sessionTtlMs = 60 * 60 * 1000;
 const maxPending = 100;
 const maxSessions = 1000;
+const authCacheTtlMs = Number(process.env.AUTH_CACHE_TTL_MS ?? 30000);
+const maxAuthCache = 5000;
 const supportedProtocolVersions = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || new URL(resource).origin).split(',').map((origin) => origin.trim()).filter(Boolean));
+const allowedHosts = new Set((process.env.ALLOWED_HOSTS || new URL(resource).host).split(',').map((host) => host.trim().toLowerCase()).filter(Boolean));
+const loopbackHosts = new Set(['127.0.0.1', '::1', 'localhost']);
 const api = new CycleoApi();
 const sessions = new Map();
 const pending = new Map();
+const authCache = new Map();
 
 if (!['bearer', 'local'].includes(authMode)) throw new Error('MCP_AUTH_MODE must be bearer or local');
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 through 65535');
 if (!Number.isFinite(oauthTimeoutMs) || oauthTimeoutMs <= 0) throw new Error('OAUTH_TIMEOUT_MS must be a positive number');
+if (!Number.isFinite(authCacheTtlMs) || authCacheTtlMs < 0) throw new Error('AUTH_CACHE_TTL_MS must be zero or a positive number');
 if (authMode === 'local' && !['127.0.0.1', '::1', 'localhost'].includes(listenHost)) {
   throw new Error('Local authentication mode must bind to a loopback host');
 }
@@ -52,6 +60,27 @@ function validateOrigin(request) {
   }
 }
 
+function validateHost(request) {
+  const host = (request.headers.host || '').toLowerCase();
+  if (!host) throw Object.assign(new Error('Host header is required'), { status: 400, code: 'missing_host' });
+  const hostname = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  if (allowedHosts.has(host) || allowedHosts.has(hostname) || loopbackHosts.has(hostname)) return;
+  throw Object.assign(new Error('Host is not allowed'), { status: 403, code: 'host_not_allowed' });
+}
+
+const corsAllowMethods = 'GET, POST, DELETE, OPTIONS';
+const corsAllowHeaders = 'Authorization, Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id';
+const corsExposeHeaders = 'Mcp-Session-Id, Mcp-Protocol-Version, WWW-Authenticate';
+
+function applyCors(request, response) {
+  const origin = request.headers.origin;
+  if (!origin || !allowedOrigins.has(origin)) return;
+  response.setHeader('access-control-allow-origin', origin);
+  response.setHeader('access-control-allow-credentials', 'true');
+  response.setHeader('access-control-expose-headers', corsExposeHeaders);
+  response.setHeader('vary', 'Origin');
+}
+
 function validateAccept(request) {
   const accept = (request.headers.accept || '').toLowerCase();
   if (!accept.includes('application/json') || !accept.includes('text/event-stream')) {
@@ -72,6 +101,9 @@ function cleanState(now = Date.now()) {
   }
   for (const [sessionId, session] of sessions) {
     if (now - session.lastSeen > sessionTtlMs) sessions.delete(sessionId);
+  }
+  for (const [key, entry] of authCache) {
+    if (entry.expires <= now) authCache.delete(key);
   }
 }
 
@@ -135,8 +167,15 @@ async function readJson(request) {
 async function authenticatedUser(request) {
   const token = tokenFrom(request) || (authMode === 'local' ? await storedAccessToken() : null);
   if (!token) throw Object.assign(new Error('Authentication required'), { status: 401, code: 'authentication_required' });
+  const cacheKey = createHash('sha256').update(token).digest('base64url');
+  const cached = authCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return { token, user: cached.user };
   const user = await api.me(token);
   if (user?.id === undefined || user?.id === null) throw new CycleoApiError('Cycleo API returned an invalid user identity');
+  if (authCacheTtlMs > 0) {
+    if (authCache.size >= maxAuthCache) authCache.delete(authCache.keys().next().value);
+    authCache.set(cacheKey, { user, expires: Date.now() + authCacheTtlMs });
+  }
   return { token, user };
 }
 
@@ -172,7 +211,7 @@ async function handleMcp(request, response) {
     const protocolVersion = supportedProtocolVersions.includes(body.params.protocolVersion) ? body.params.protocolVersion : supportedProtocolVersions[0];
     const sessionId = randomUUID();
     sessions.set(sessionId, { userKey: userKey(user), protocolVersion, initialized: false, lastSeen: Date.now() });
-    return send(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'cycleo-mcp', version: '0.1.0' } } }, { 'mcp-session-id': sessionId });
+    return send(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion, capabilities: { tools: {}, resources: {}, prompts: {} }, serverInfo: { name: 'cycleo-mcp', version: '0.1.0' } } }, { 'mcp-session-id': sessionId });
   }
   const { session } = requireSession(request, user);
   if (body.method === 'notifications/initialized') {
@@ -194,15 +233,80 @@ async function handleMcp(request, response) {
       throw error;
     }
   }
+  if (body.method === 'resources/list') return send(response, 200, { jsonrpc: '2.0', id, result: { resources: RESOURCE_DEFINITIONS } });
+  if (body.method === 'resources/templates/list') return send(response, 200, { jsonrpc: '2.0', id, result: { resourceTemplates: RESOURCE_TEMPLATES } });
+  if (body.method === 'resources/read') {
+    try {
+      return send(response, 200, { jsonrpc: '2.0', id, result: await readResource(body.params?.uri, { api, token, user }) });
+    } catch (error) {
+      if (error.jsonRpcCode) return sendRpcError(response, id, error.jsonRpcCode, error.message);
+      if (error instanceof CycleoApiError) return sendRpcError(response, id, error.status === 404 ? -32002 : -32603, error.message);
+      throw error;
+    }
+  }
+  if (body.method === 'prompts/list') return send(response, 200, { jsonrpc: '2.0', id, result: { prompts: PROMPT_DEFINITIONS } });
+  if (body.method === 'prompts/get') {
+    try {
+      return send(response, 200, { jsonrpc: '2.0', id, result: getPrompt(body.params?.name, body.params?.arguments ?? {}) });
+    } catch (error) {
+      if (error.jsonRpcCode) return sendRpcError(response, id, error.jsonRpcCode, error.message);
+      throw error;
+    }
+  }
   return sendRpcError(response, id, -32601, 'Method not found');
+}
+
+function validateStreamAccept(request) {
+  const accept = (request.headers.accept || '').toLowerCase();
+  if (!accept.includes('text/event-stream') && !accept.includes('*/*')) {
+    throw Object.assign(new Error('Accept must include text/event-stream'), { status: 406, code: 'not_acceptable' });
+  }
+}
+
+async function handleMcpStream(request, response) {
+  validateStreamAccept(request);
+  const { user } = await authenticatedUser(request);
+  const { session } = requireSession(request, user);
+
+  response.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-store',
+    connection: 'keep-alive'
+  });
+  response.write(': open\n\n');
+
+  const streams = session.streams || (session.streams = new Set());
+  streams.add(response);
+
+  const keepAlive = setInterval(() => {
+    session.lastSeen = Date.now();
+    response.write(': keep-alive\n\n');
+  }, 25000);
+  keepAlive.unref?.();
+
+  const close = () => {
+    clearInterval(keepAlive);
+    streams.delete(response);
+  };
+  request.on('close', close);
+  response.on('close', close);
 }
 
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
+    applyCors(request, response);
     validateOrigin(request);
+    validateHost(request);
+    if (request.method === 'OPTIONS') {
+      return send(response, 204, undefined, {
+        'access-control-allow-methods': corsAllowMethods,
+        'access-control-allow-headers': corsAllowHeaders,
+        'access-control-max-age': '600'
+      });
+    }
     if (url.pathname === '/healthz') return send(response, 200, { ok: true, service: 'cycleo-mcp' });
-    if (url.pathname === '/.well-known/oauth-protected-resource') return send(response, 200, { resource, authorization_servers: [issuer], scopes_supported: ['cycleo:read'], resource_documentation: `${resource}/docs` });
+    if (url.pathname === '/.well-known/oauth-protected-resource') return send(response, 200, { resource, authorization_servers: [issuer], scopes_supported: ['cycleo:read'] });
     if (url.pathname === '/connect') {
       if (authMode !== 'local') return send(response, 404, { error: 'not_found' });
       if (request.method !== 'GET') return send(response, 405, { error: 'method_not_allowed' }, { allow: 'GET' });
@@ -246,7 +350,8 @@ const server = createServer(async (request, response) => {
       sessions.delete(sessionId);
       return send(response, 204);
     }
-    if (request.method !== 'POST') return send(response, 405, { error: 'method_not_allowed' }, { allow: 'POST, DELETE' });
+    if (request.method === 'GET') return await handleMcpStream(request, response);
+    if (request.method !== 'POST') return send(response, 405, { error: 'method_not_allowed' }, { allow: 'GET, POST, DELETE' });
     validateAccept(request);
     validateContentType(request);
     return await handleMcp(request, response);
@@ -259,8 +364,19 @@ const server = createServer(async (request, response) => {
   }
 });
 
+function shutdown(signal) {
+  console.log(`Cycleo MCP received ${signal}, draining connections`);
+  server.close(() => process.exit(0));
+  server.closeIdleConnections?.();
+  for (const session of sessions.values()) {
+    for (const stream of session.streams || []) stream.end();
+  }
+  setTimeout(() => process.exit(0), 15000).unref();
+}
+
 if (process.env.NODE_ENV !== 'test') {
   server.listen(port, listenHost, () => console.log(`Cycleo MCP listening on ${listenHost}:${port} (${authMode} auth)`));
+  for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => shutdown(signal));
 }
 
 export { server };
