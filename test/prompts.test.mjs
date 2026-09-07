@@ -18,6 +18,7 @@ test('prompts render user messages and interpolate validated arguments', () => {
   const plan = getPrompt('cycleo_transfer_plan', { raceId: '2981', limit: '10' });
   assert.match(plan.messages[0].content.text, /race 2981/);
   assert.match(plan.messages[0].content.text, /at most 10 suggestions/);
+  assert.doesNotMatch(plan.messages[0].content.text, /against my roster and budget/, 'Cycleo has no budget mechanic to compare against');
 
   const preview = getPrompt('cycleo_race_preview', { raceId: '456' });
   assert.match(preview.messages[0].content.text, /race 456/);

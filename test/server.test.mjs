@@ -10,8 +10,21 @@ const upstreamCalls = [];
 before(async () => {
   upstream = createServer((request, response) => {
     upstreamCalls.push({ url: request.url, authorization: request.headers.authorization });
+    if (request.url === '/oauth/token') {
+      let raw = '';
+      request.on('data', (chunk) => { raw += chunk; });
+      return request.on('end', () => {
+        const subjectToken = new URLSearchParams(raw).get('subject_token');
+        if (subjectToken === 'mobile-token') {
+          response.writeHead(400, { 'content-type': 'application/json' });
+          return response.end(JSON.stringify({ error: 'invalid_grant' }));
+        }
+        response.writeHead(200, { 'content-type': 'application/json' });
+        return response.end(JSON.stringify({ access_token: `backend-${subjectToken}`, token_type: 'Bearer', expires_in: 60 }));
+      });
+    }
     if (request.url === '/auth/me') {
-      const id = request.headers.authorization === 'Bearer other-token' ? 2 : 1;
+      const id = request.headers.authorization === 'Bearer backend-other-token' ? 2 : 1;
       response.writeHead(200, { 'content-type': 'application/json' });
       return response.end(JSON.stringify({ data: { id, league_id: 10 } }));
     }
@@ -23,6 +36,7 @@ before(async () => {
   process.env.NODE_ENV = 'test';
   process.env.MCP_AUTH_MODE = 'bearer';
   process.env.CYCLEO_API_BASE_URL = `http://127.0.0.1:${upstream.address().port}`;
+  process.env.OAUTH_ISSUER = `http://127.0.0.1:${upstream.address().port}`;
   ({ server } = await import(`../src/server.mjs?server-test=${Date.now()}`));
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   endpoint = `http://127.0.0.1:${server.address().port}/mcp`;
@@ -53,6 +67,10 @@ test('bearer mode requires per-request authentication and hides local OAuth', as
 
   const connect = await fetch(endpoint.replace('/mcp', '/connect'), { redirect: 'manual' });
   assert.equal(connect.status, 404);
+
+  const mobileToken = await post({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2025-11-25' } }, { token: 'mobile-token' });
+  assert.equal(mobileToken.status, 401);
+  assert.equal((await mobileToken.json()).error.code, 'invalid_token');
 });
 
 test('MCP sessions are negotiated, user-bound, initialized and terminable', async () => {
@@ -85,6 +103,20 @@ test('MCP sessions are negotiated, user-bound, initialized and terminable', asyn
   assert.equal(deleted.status, 204);
   const expired = await post({ jsonrpc: '2.0', id: 6, method: 'tools/list' }, { sessionId, protocolVersion: '2025-11-25' });
   assert.equal(expired.status, 404);
+});
+
+test('JSON-RPC notifications are acknowledged without a response body', async () => {
+  const initialized = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+  const sessionId = initialized.headers.get('mcp-session-id');
+  await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, { sessionId });
+
+  const cancelled = await post({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 42, reason: 'user aborted' } }, { sessionId });
+  assert.equal(cancelled.status, 202);
+  assert.equal(await cancelled.text(), '', 'a notification never receives a JSON-RPC response');
+
+  const unknown = await post({ jsonrpc: '2.0', method: 'notifications/progress', params: {} }, { sessionId });
+  assert.equal(unknown.status, 202);
+  assert.equal(await unknown.text(), '');
 });
 
 test('resources and prompts are advertised and served over JSON-RPC', async () => {
@@ -127,6 +159,8 @@ test('successful tool calls return both text and structured content', async () =
   assert.equal(result.isError, false);
   assert.deepEqual(result.structuredContent, { ok: true });
   assert.equal(result.content[0].text, JSON.stringify({ ok: true }));
+  const toolCall = upstreamCalls.find((call) => call.url === '/team');
+  assert.equal(toolCall.authorization, 'Bearer backend-test-token', 'the client-facing token never reaches the Cycleo API');
 });
 
 test('requests with an unrecognised Host header are rejected', async () => {

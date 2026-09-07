@@ -13,9 +13,18 @@ let tokenStorePath;
 
 before(async () => {
   upstream = createServer((request, response) => {
+    if (request.url === '/oauth/token') {
+      let raw = '';
+      request.on('data', (chunk) => { raw += chunk; });
+      return request.on('end', () => {
+        const grant = new URLSearchParams(raw).get('grant_type');
+        response.writeHead(200, { 'content-type': 'application/json' });
+        if (grant === 'authorization_code') return response.end(JSON.stringify({ access_token: 'stored-token', refresh_token: 'refresh-token', expires_in: 3600 }));
+        return response.end(JSON.stringify({ access_token: 'backend-token', token_type: 'Bearer', expires_in: 60 }));
+      });
+    }
     response.writeHead(200, { 'content-type': 'application/json' });
-    if (request.url === '/oauth/token') return response.end(JSON.stringify({ access_token: 'stored-token', refresh_token: 'refresh-token', expires_in: 3600 }));
-    if (request.url === '/api/auth/me' && request.headers.authorization === 'Bearer stored-token') {
+    if (request.url === '/api/auth/me' && request.headers.authorization === 'Bearer backend-token') {
       return response.end(JSON.stringify({ data: { id: 7, league_id: 3 } }));
     }
     response.statusCode = 401;

@@ -53,7 +53,7 @@ export function getPrompt(name, args = {}) {
       const cap = limit ? ` Request at most ${limit} suggestions.` : '';
       return {
         description: `Plan transfers for race ${raceId}`,
-        messages: [message(`Call cycleo_get_my_team for my current roster and cycleo_get_transfer_advice for race ${raceId}.${cap} Compare the TransferAI suggestions against my roster and budget, then propose an ordered transfer shortlist with the reasoning for each pick. Flag when the race has already started or a suggested rider is already owned.`)]
+        messages: [message(`Call cycleo_get_my_team for my current roster and cycleo_get_transfer_advice for race ${raceId}.${cap} Compare the TransferAI suggestions against my roster, then propose an ordered transfer shortlist with the reasoning for each pick. Cycleo has no rider prices or budget, so do not introduce budget constraints. Flag when the race has already started or a suggested rider is already owned.`)]
       };
     }
     case 'cycleo_race_preview': {

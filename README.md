@@ -78,9 +78,11 @@ Protected-resource metadata (RFC 9728) is served both at
 `/.well-known/oauth-protected-resource/mcp` that MCP clients probe.
 
 The MCP server never receives Cycleo passwords and never connects to the Cycleo
-database. It validates each request's identity through `GET /auth/me`, binds MCP
-sessions to that user and league, and only forwards the allow-listed read routes
-in `src/tools.mjs`, `src/resources.mjs` and `src/prompts.mjs`.
+database. It exchanges each client-facing MCP token for a distinct, short-lived
+backend token before calling `GET /auth/me`, binds MCP sessions to that user and
+league, and only calls the allow-listed read routes in `src/tools.mjs`,
+`src/resources.mjs` and `src/prompts.mjs`. Ordinary Cycleo mobile tokens cannot
+be exchanged and are rejected by the MCP authentication boundary.
 
 ## Capabilities
 
