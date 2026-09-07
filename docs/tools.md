@@ -14,8 +14,10 @@ JSON-RPC `-32602` error.
 Every Cycleo API response is read through a byte cap (`CYCLEO_MAX_RESPONSE_BYTES`,
 default 1 MiB); an over-limit response fails with `cycleo_response_too_large`
 rather than being buffered in full. Transient upstream failures (network errors,
-HTTP 429/502/503/504) are retried up to `CYCLEO_MAX_RETRIES` times (default 2)
-with backoff.
+HTTP 429/502/503/504) are retried up to `CYCLEO_MAX_RETRIES` times (default 2).
+Exponential backoff is capped at two seconds, but an explicit `Retry-After`
+response header is honoured up to 30 seconds so the client actually backs off
+while Cycleo is throttling.
 
 A successful `tools/call` returns the Cycleo payload twice: as a JSON string in
 `content[0].text` and as `structuredContent` for clients that consume typed
@@ -33,7 +35,7 @@ not part of this repository's contract.
 | `cycleo_list_races` | `GET /races` | `limit`, `page` |
 | `cycleo_get_race` | `GET /races/{raceId}/overview` | `raceId` |
 | `cycleo_get_transfer_advice` | `GET /races/{raceId}/transfer-advice` | `raceId`, `limit`, `includeOwned`, `allowStarted` |
-| `cycleo_search_riders` | `GET /search` | `query`, `limit` |
+| `cycleo_search_riders` | `GET /search` | `query` |
 | `cycleo_get_rider` | `GET /riders/{riderId}` | `riderId` |
 | `cycleo_get_rankings` | `GET /rankings/cycleo-points` | — |
 | `cycleo_get_race_result` | `GET /races/{raceId}/cycleo-result` | `raceId` |
@@ -72,6 +74,15 @@ league's calculated Cycleo points per team for one race;
 `cycleo_get_race_classification` (`GET /races/{raceId}/classification`) returns
 the final rider classification enriched with league ownership. Both take a
 positive `raceId` and stay within the caller's league.
+
+## Rider search
+
+`cycleo_search_riders` calls `GET /search` with the query pinned to
+`type=renner`. The Cycleo API requires at least two characters (shorter queries
+return nothing), matches on rider name and professional team, ignores any
+`limit`, and returns at most six riders. The tool therefore takes only `query`
+(2–80 characters) and returns `{ riders: [...] }`; races and teams from the
+shared search route are not exposed.
 
 ## Transfers
 

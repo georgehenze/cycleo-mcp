@@ -36,6 +36,8 @@ const sessions = new Map();
 const pending = new Map();
 const authCache = new Map();
 const rateBuckets = new Map();
+const tokenExchangeGrant = 'urn:ietf:params:oauth:grant-type:token-exchange';
+const accessTokenType = 'urn:ietf:params:oauth:token-type:access_token';
 
 if (!['bearer', 'local'].includes(authMode)) throw new Error('MCP_AUTH_MODE must be bearer or local');
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 through 65535');
@@ -213,29 +215,66 @@ async function storedAccessToken() {
   return tokens?.access_token || null;
 }
 
-async function readJson(request) {
-  let raw = '';
-  for await (const chunk of request) {
-    raw += chunk;
-    if (raw.length > 1024 * 1024) throw Object.assign(new Error('Request too large'), { status: 413, code: 'request_too_large' });
+async function exchangeAccessToken(token) {
+  const body = new URLSearchParams({
+    grant_type: tokenExchangeGrant,
+    subject_token: token,
+    subject_token_type: accessTokenType,
+    resource: api.baseUrl
+  });
+  const response = await oauthFetch(`${issuer}/oauth/token`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body
+  });
+  let payload = null;
+  try { payload = await response.json(); } catch { /* handled below */ }
+  if (!response.ok) {
+    const authenticationFailure = response.status === 400 || response.status === 401;
+    throw Object.assign(new Error(authenticationFailure ? 'Invalid MCP access token' : 'OAuth token exchange failed'), {
+      status: authenticationFailure ? 401 : 502,
+      code: authenticationFailure ? 'invalid_token' : 'oauth_exchange_failed'
+    });
   }
-  return raw ? JSON.parse(raw) : {};
+  if (typeof payload?.access_token !== 'string' || payload.access_token === '') {
+    throw Object.assign(new Error('OAuth token exchange returned an invalid access token'), { status: 502, code: 'oauth_exchange_failed' });
+  }
+  const expiresIn = Number(payload.expires_in);
+  return {
+    token: payload.access_token,
+    expiresIn: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 60
+  };
+}
+
+const maxRequestBytes = 1024 * 1024;
+
+async function readJson(request) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of request) {
+    total += chunk.byteLength;
+    if (total > maxRequestBytes) throw Object.assign(new Error('Request too large'), { status: 413, code: 'request_too_large' });
+    chunks.push(chunk);
+  }
+  return total ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
 }
 
 async function authenticatedUser(request) {
-  const token = tokenFrom(request) || (authMode === 'local' ? await storedAccessToken() : null);
-  if (!token) throw Object.assign(new Error('Authentication required'), { status: 401, code: 'authentication_required' });
-  const key = tokenKey(token);
+  const subjectToken = tokenFrom(request) || (authMode === 'local' ? await storedAccessToken() : null);
+  if (!subjectToken) throw Object.assign(new Error('Authentication required'), { status: 401, code: 'authentication_required' });
+  const key = tokenKey(subjectToken);
   enforceRateLimit(key);
   const cached = authCache.get(key);
-  if (cached && cached.expires > Date.now()) return { token, user: cached.user, key };
-  const user = await api.me(token);
+  if (cached && cached.expires > Date.now()) return { token: cached.apiToken, user: cached.user, key };
+  const exchange = await exchangeAccessToken(subjectToken);
+  const user = await api.me(exchange.token);
   if (user?.id === undefined || user?.id === null) throw new CycleoApiError('Cycleo API returned an invalid user identity');
   if (authCacheTtlMs > 0) {
     if (authCache.size >= maxAuthCache) authCache.delete(authCache.keys().next().value);
-    authCache.set(key, { user, expires: Date.now() + authCacheTtlMs });
+    const exchangeTtlMs = Math.max(1000, (exchange.expiresIn - 5) * 1000);
+    authCache.set(key, { apiToken: exchange.token, user, expires: Date.now() + Math.min(authCacheTtlMs, exchangeTtlMs) });
   }
-  return { token, user, key };
+  return { token: exchange.token, user, key };
 }
 
 function userKey(user) {
@@ -256,12 +295,36 @@ function requireSession(request, user) {
   return { sessionId, session };
 }
 
+// Register an in-flight request so a later notifications/cancelled can abort it.
+// Requests without an id (which the spec forbids for cancellable requests, but
+// be defensive) get a live signal that simply never fires.
+function trackRequest(session, id) {
+  const controller = new AbortController();
+  if (id === null || id === undefined) return { signal: controller.signal, release() {} };
+  const inFlight = session.inFlight || (session.inFlight = new Map());
+  inFlight.set(id, controller);
+  return {
+    signal: controller.signal,
+    release() { inFlight.delete(id); }
+  };
+}
+
+// A view of the Cycleo API client that threads a cancellation signal into every
+// upstream GET, so aborting the signal stops work that is still in flight.
+function cancellableApi(signal) {
+  return { get: (path, token, query) => api.get(path, token, query, { signal }) };
+}
+
 async function handleMcp(request, response) {
   const { token, user } = await authenticatedUser(request);
   const body = await readJson(request);
   const id = body.id ?? null;
+  // JSON-RPC notifications carry no id and must never receive a response, not
+  // even an error one; they are acknowledged with a bare 202.
+  const isNotification = body !== null && typeof body === 'object' && !Array.isArray(body)
+    && body.id === undefined && typeof body.method === 'string';
   if (!body || typeof body !== 'object' || Array.isArray(body) || body.jsonrpc !== '2.0' || typeof body.method !== 'string') {
-    return sendRpcError(response, id, -32600, 'Invalid Request');
+    return isNotification ? send(response, 202) : sendRpcError(response, id, -32600, 'Invalid Request');
   }
   if (body.method === 'initialize') {
     if (typeof body.params?.protocolVersion !== 'string') return sendRpcError(response, id, -32602, 'protocolVersion is required');
@@ -278,31 +341,50 @@ async function handleMcp(request, response) {
     session.initialized = true;
     return send(response, 202);
   }
+  if (isNotification) {
+    if (body.method === 'notifications/cancelled') {
+      const cancelledId = body.params?.requestId;
+      if (cancelledId !== undefined) session.inFlight?.get(cancelledId)?.abort(new DOMException('Cancelled by client', 'AbortError'));
+    }
+    return send(response, 202);
+  }
   if (!session.initialized && body.method !== 'ping') return sendRpcError(response, id, -32002, 'MCP session is not initialized');
   if (body.method === 'ping') return send(response, 200, { jsonrpc: '2.0', id, result: {} });
   if (body.method === 'tools/list') return send(response, 200, { jsonrpc: '2.0', id, result: { tools: TOOL_DEFINITIONS.map((tool) => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true } })) } });
   if (body.method === 'tools/call') {
+    const { signal, release } = trackRequest(session, id);
     try {
-      const data = await callTool(body.params?.name, body.params?.arguments ?? {}, { api, token, user });
+      const data = await callTool(body.params?.name, body.params?.arguments ?? {}, { api: cancellableApi(signal), token, user });
+      if (signal.aborted) return response.end();
       const structuredContent = data !== null && typeof data === 'object' && !Array.isArray(data) ? data : { data };
       return send(response, 200, { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent, isError: false } });
     } catch (error) {
+      // The client cancelled this request: MCP says not to answer it at all.
+      if (signal.aborted) return response.end();
       if (error.jsonRpcCode) return sendRpcError(response, id, error.jsonRpcCode, error.message);
       if (error instanceof CycleoApiError) {
         return send(response, 200, { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify({ error: { code: error.code, message: error.message } }) }], isError: true } });
       }
       throw error;
+    } finally {
+      release();
     }
   }
   if (body.method === 'resources/list') return send(response, 200, { jsonrpc: '2.0', id, result: { resources: RESOURCE_DEFINITIONS } });
   if (body.method === 'resources/templates/list') return send(response, 200, { jsonrpc: '2.0', id, result: { resourceTemplates: RESOURCE_TEMPLATES } });
   if (body.method === 'resources/read') {
+    const { signal, release } = trackRequest(session, id);
     try {
-      return send(response, 200, { jsonrpc: '2.0', id, result: await readResource(body.params?.uri, { api, token, user }) });
+      const result = await readResource(body.params?.uri, { api: cancellableApi(signal), token, user });
+      if (signal.aborted) return response.end();
+      return send(response, 200, { jsonrpc: '2.0', id, result });
     } catch (error) {
+      if (signal.aborted) return response.end();
       if (error.jsonRpcCode) return sendRpcError(response, id, error.jsonRpcCode, error.message);
       if (error instanceof CycleoApiError) return sendRpcError(response, id, error.status === 404 ? -32002 : -32603, error.message);
       throw error;
+    } finally {
+      release();
     }
   }
   if (body.method === 'prompts/list') return send(response, 200, { jsonrpc: '2.0', id, result: { prompts: PROMPT_DEFINITIONS } });

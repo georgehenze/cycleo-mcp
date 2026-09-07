@@ -3,6 +3,7 @@ const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_RETRY_BASE_MS = 150;
 const MAX_RETRY_DELAY_MS = 2000;
+const MAX_RETRY_AFTER_MS = 30000;
 const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
 
 export class CycleoApiError extends Error {
@@ -60,14 +61,15 @@ export class CycleoApi {
     this.retryBaseMs = Number(process.env.CYCLEO_RETRY_BASE_MS || DEFAULT_RETRY_BASE_MS);
   }
 
-  async #attempt(url, token) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+  async #attempt(url, token, signal) {
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(), this.timeoutMs);
+    const signals = signal ? [timeoutController.signal, signal] : [timeoutController.signal];
     try {
       const response = await fetch(url, {
         method: 'GET',
         headers: { accept: 'application/json', authorization: `Bearer ${token}`, 'x-cycleo-client': 'mcp' },
-        signal: controller.signal
+        signal: AbortSignal.any(signals)
       });
       const raw = await readCappedText(response, this.maxResponseBytes);
       let body = null;
@@ -81,6 +83,7 @@ export class CycleoApi {
       }
       return body?.data ?? body;
     } catch (error) {
+      if (signal?.aborted) throw new CycleoApiError('Cycleo API request was cancelled', 499, 'cycleo_cancelled');
       if (error.name === 'AbortError') throw new CycleoApiError('Cycleo API request timed out', 504, 'cycleo_timeout');
       if (error instanceof CycleoApiError) throw error;
       throw new CycleoApiError('Cycleo API is unavailable', 502, 'cycleo_unavailable', { retryable: true });
@@ -89,7 +92,7 @@ export class CycleoApi {
     }
   }
 
-  async get(path, token, query = {}) {
+  async get(path, token, query = {}, { signal } = {}) {
     const url = new URL(`${this.baseUrl}${path}`);
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
@@ -97,11 +100,17 @@ export class CycleoApi {
 
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await this.#attempt(url, token);
+        return await this.#attempt(url, token, signal);
       } catch (error) {
-        if (!error.retryable || attempt >= this.maxRetries) throw error;
+        if (signal?.aborted || !error.retryable || attempt >= this.maxRetries) throw error;
+        // Exponential backoff is capped tightly, but an explicit server-provided
+        // Retry-After is honoured up to a much larger ceiling so we actually
+        // back off while Cycleo is throttling.
         const backoff = Math.min(MAX_RETRY_DELAY_MS, this.retryBaseMs * 2 ** attempt) + Math.random() * 50;
-        await sleep(Math.min(MAX_RETRY_DELAY_MS, error.retryAfterMs ?? backoff));
+        const delay = error.retryAfterMs === undefined
+          ? backoff
+          : Math.min(MAX_RETRY_AFTER_MS, error.retryAfterMs);
+        await sleep(delay);
       }
     }
   }

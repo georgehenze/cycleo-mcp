@@ -8,6 +8,15 @@ let endpoint;
 
 before(async () => {
   upstream = createServer((request, response) => {
+    if (request.url === '/oauth/token') {
+      let raw = '';
+      request.on('data', (chunk) => { raw += chunk; });
+      return request.on('end', () => {
+        const subjectToken = new URLSearchParams(raw).get('subject_token');
+        response.writeHead(200, { 'content-type': 'application/json' });
+        return response.end(JSON.stringify({ access_token: `backend-${subjectToken}`, token_type: 'Bearer', expires_in: 60 }));
+      });
+    }
     response.writeHead(200, { 'content-type': 'application/json' });
     if (request.url === '/auth/me') return response.end(JSON.stringify({ data: { id: 1, league_id: 10 } }));
     return response.end(JSON.stringify({ data: { ok: true } }));
@@ -17,6 +26,7 @@ before(async () => {
   process.env.NODE_ENV = 'test';
   process.env.MCP_AUTH_MODE = 'bearer';
   process.env.CYCLEO_API_BASE_URL = `http://127.0.0.1:${upstream.address().port}`;
+  process.env.OAUTH_ISSUER = `http://127.0.0.1:${upstream.address().port}`;
   process.env.RATE_LIMIT_PER_MIN = '3';
   ({ server } = await import(`../src/server.mjs?rate-limit-test=${Date.now()}`));
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

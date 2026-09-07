@@ -68,3 +68,15 @@ test('Cycleo API client retries transient failures then gives up', async () => {
   await assert.rejects(client.get('/flaky?fail=9', 'secret'), { status: 503, code: 'unavailable' });
   assert.equal(attempts.get('/flaky?fail=9'), 3, 'one initial call plus two retries');
 });
+
+test('Cycleo API client stops an in-flight request when its signal is aborted', async () => {
+  const client = new CycleoApi({ baseUrl, timeoutMs: 5000 });
+  const controller = new AbortController();
+  const pending = client.get('/slow', 'secret', {}, { signal: controller.signal });
+  setTimeout(() => controller.abort(), 20);
+  await assert.rejects(pending, (error) => {
+    assert.ok(error instanceof CycleoApiError);
+    assert.equal(error.code, 'cycleo_cancelled');
+    return true;
+  });
+});

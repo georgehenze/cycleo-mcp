@@ -30,6 +30,20 @@ test('tool handlers only call allow-listed GET routes', async () => {
   assert.deepEqual(calls[8].query, { page: 1, limit: 5 });
 });
 
+test('cycleo_search_riders pins the search type, drops the ignored limit and returns only riders', async () => {
+  const calls = [];
+  const api = { get: async (path, token, query) => { calls.push({ path, query }); return { riders: [{ id: 1 }], races: [{ id: 9 }], teams: [{ id: 4 }] }; } };
+  const result = await callTool('cycleo_search_riders', { query: '  Poga  ' }, { api, token: 't', user: { id: 1 } });
+  assert.deepEqual(calls, [{ path: '/search', query: { q: 'Poga', type: 'renner' } }]);
+  assert.deepEqual(result, { riders: [{ id: 1 }] });
+});
+
+test('cycleo_search_riders rejects queries shorter than the API minimum', async () => {
+  const context = { api: { get: async () => assert.fail('short queries must not reach the API') }, token: 't', user: { id: 1 } };
+  await assert.rejects(callTool('cycleo_search_riders', { query: 'a' }, context), { code: 'invalid_params' });
+  await assert.rejects(callTool('cycleo_search_riders', { query: 'ab', limit: 5 }, context), { code: 'invalid_params' });
+});
+
 test('cycleo_get_my_context enriches identity with the season snapshot', async () => {
   const calls = [];
   const api = { get: async (path) => { calls.push(path); return { season: 2026 }; } };

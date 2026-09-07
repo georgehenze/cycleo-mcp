@@ -12,7 +12,7 @@ export const TOOL_DEFINITIONS = [
   { name: 'cycleo_list_races', title: 'List Cycleo races', description: 'List visible Cycleo races with optional paging.', inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, page: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_race', title: 'Cycleo race overview', description: 'Get a visible Cycleo race and its read-only overview.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_transfer_advice', title: 'TransferAI advice', description: 'Get account-gated TransferAI advice for a visible Cycleo race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, includeOwned: { type: 'boolean', default: false }, allowStarted: { type: 'boolean', default: false } }, additionalProperties: false } },
-  { name: 'cycleo_search_riders', title: 'Search Cycleo riders', description: 'Search visible Cycleo riders.', inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string', minLength: 1, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT } }, additionalProperties: false } },
+  { name: 'cycleo_search_riders', title: 'Search Cycleo riders', description: 'Search visible Cycleo riders by name or professional team. The query needs at least two characters; the Cycleo API returns at most six riders.', inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string', minLength: 2, maxLength: 80 } }, additionalProperties: false } },
   { name: 'cycleo_get_rider', title: 'Cycleo rider profile', description: 'Get a visible Cycleo rider profile.', inputSchema: { type: 'object', required: ['riderId'], properties: { riderId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_rankings', title: 'Cycleo league standings', description: 'Get the authenticated league standings: the Cycleopunten ranking plus the medal and special rankings.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'cycleo_get_race_result', title: 'Cycleo race result', description: 'Get the authenticated league\'s calculated Cycleo result (points per team) for a visible race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
@@ -50,7 +50,9 @@ export function validateToolArguments(name, args) {
     if (property.type === 'boolean' && typeof value !== 'boolean') throw invalidArguments(`${key} must be a boolean`);
     if (property.minimum !== undefined && value < property.minimum) throw invalidArguments(`${key} must be at least ${property.minimum}`);
     if (property.maximum !== undefined && value > property.maximum) throw invalidArguments(`${key} must be at most ${property.maximum}`);
-    if (property.minLength !== undefined && value.trim().length < property.minLength) throw invalidArguments(`${key} must not be empty`);
+    if (property.minLength !== undefined && value.trim().length < property.minLength) {
+      throw invalidArguments(property.minLength === 1 ? `${key} must not be empty` : `${key} must be at least ${property.minLength} characters`);
+    }
     if (property.maxLength !== undefined && value.length > property.maxLength) throw invalidArguments(`${key} is too long`);
   }
   return args;
@@ -73,7 +75,12 @@ export async function callTool(name, args, { api, token, user }) {
       include_owned: args.includeOwned === true ? 1 : undefined,
       allow_started: args.allowStarted === true ? 1 : undefined
     });
-    case 'cycleo_search_riders': return api.get('/search', token, { q: String(args.query).trim(), limit: limit(args.limit) });
+    case 'cycleo_search_riders': {
+      // The Cycleo /search route ignores `limit`, always returns at most six
+      // riders, and also returns races and teams unless the type is pinned.
+      const results = await api.get('/search', token, { q: String(args.query).trim(), type: 'renner' });
+      return { riders: results?.riders ?? [] };
+    }
     case 'cycleo_get_rider': return api.get(`/riders/${integer(args.riderId)}`, token);
     case 'cycleo_get_rankings': return api.get('/rankings/cycleo-points', token);
     case 'cycleo_get_race_result': return api.get(`/races/${integer(args.raceId)}/cycleo-result`, token);
