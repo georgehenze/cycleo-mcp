@@ -38,7 +38,7 @@ export async function readResource(uri, { api, token, user }) {
   if (uri === 'cycleo://overview') return wrap(await api.get('/today', token));
   if (uri === 'cycleo://races') return wrap(await api.get('/races', token, { page: 1, limit: 20 }));
   if (uri === 'cycleo://rankings') return wrap(await api.get('/rankings/cycleo-points', token));
-  if (uri === 'cycleo://transfers/history') return wrap(await api.get('/transfers/history', token));
+  if (uri === 'cycleo://transfers/history') return wrap(await api.get('/transfers/history', token, { limit: 20 }));
   if (uri === 'cycleo://transfers/radar') return wrap(await api.get('/transfers/radar', token));
 
   let match;

@@ -38,7 +38,7 @@ not part of this repository's contract.
 | `cycleo_get_rankings` | `GET /rankings/cycleo-points` | — |
 | `cycleo_get_race_result` | `GET /races/{raceId}/cycleo-result` | `raceId` |
 | `cycleo_get_race_classification` | `GET /races/{raceId}/classification` | `raceId` |
-| `cycleo_get_transfer_history` | `GET /transfers/history` | — |
+| `cycleo_get_transfer_history` | `GET /transfers/history` | `limit`, `page` |
 | `cycleo_get_transfer_radar` | `GET /transfers/radar` | — |
 
 All routes resolve identity and league from the bearer token
@@ -79,6 +79,11 @@ positive `raceId` and stay within the caller's league.
 `cycleo_get_transfer_radar` (`GET /transfers/radar`) are league-scoped read
 views of completed transfers and of the most-transferred riders. The game has
 no rider prices, so there is no market or valuation tool.
+
+`cycleo_get_transfer_history` always sends `limit` (default 20, max 50) and
+`page` (default 1); the full league history for an admin spans a whole season
+and would otherwise exceed `CYCLEO_MAX_RESPONSE_BYTES`. Results are newest
+first.
 
 ## TransferAI
 

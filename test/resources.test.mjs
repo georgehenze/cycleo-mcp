@@ -40,6 +40,7 @@ test('resource reads only reach allow-listed GET routes', async () => {
     '/teams/42', '/races/2981/overview', '/races/2981/transfer-advice',
     '/races/2981/cycleo-result', '/races/2981/classification', '/riders/7'
   ]);
+  assert.deepEqual(calls.find((call) => call.path === '/transfers/history').query, { limit: 20 });
 });
 
 test('resource reads reject malformed and unknown uris before any API call', async () => {

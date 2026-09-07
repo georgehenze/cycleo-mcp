@@ -18,7 +18,7 @@ test('tool handlers only call allow-listed GET routes', async () => {
   await callTool('cycleo_get_rankings', {}, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_race_result', { raceId: 2981 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_race_classification', { raceId: 2981 }, { api, token: 't', user: { id: 1 } });
-  await callTool('cycleo_get_transfer_history', {}, { api, token: 't', user: { id: 1 } });
+  await callTool('cycleo_get_transfer_history', { limit: 5 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_transfer_radar', {}, { api, token: 't', user: { id: 1 } });
   assert.deepEqual(calls.map((call) => call.path), [
     '/team', '/teams/42', '/today', '/races', '/races/2981/transfer-advice',
@@ -27,6 +27,7 @@ test('tool handlers only call allow-listed GET routes', async () => {
   ]);
   assert.equal(calls[3].query.limit, 50);
   assert.deepEqual(calls[4].query, { limit: 12, include_owned: 1, allow_started: 1 });
+  assert.deepEqual(calls[8].query, { page: 1, limit: 5 });
 });
 
 test('cycleo_get_my_context enriches identity with the season snapshot', async () => {
