@@ -15,6 +15,9 @@ There is no `subscribe` or `listChanged` support.
 | `cycleo://team` | `GET /team` |
 | `cycleo://overview` | `GET /today` |
 | `cycleo://races` | `GET /races` (first page) |
+| `cycleo://rankings` | `GET /rankings/cycleo-points` |
+| `cycleo://transfers/history` | `GET /transfers/history` |
+| `cycleo://transfers/radar` | `GET /transfers/radar` |
 
 `resources/templates/list` returns the id-addressed templates:
 
@@ -23,7 +26,12 @@ There is no `subscribe` or `listChanged` support.
 | `cycleo://teams/{teamId}` | `GET /teams/{teamId}` |
 | `cycleo://races/{raceId}` | `GET /races/{raceId}/overview` |
 | `cycleo://races/{raceId}/transfer-advice` | `GET /races/{raceId}/transfer-advice` |
+| `cycleo://races/{raceId}/result` | `GET /races/{raceId}/cycleo-result` |
+| `cycleo://races/{raceId}/classification` | `GET /races/{raceId}/classification` |
 | `cycleo://riders/{riderId}` | `GET /riders/{riderId}` |
+
+`cycleo://me` is the raw identity only; the enriched season snapshot is on the
+`cycleo_get_my_context` tool and `cycleo://rankings`.
 
 `resources/read` accepts one `uri`. Every result is a single
 `application/json` text content holding the API response. Ids must be positive

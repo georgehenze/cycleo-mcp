@@ -78,8 +78,10 @@ in `src/tools.mjs`, `src/resources.mjs` and `src/prompts.mjs`.
 
 The server advertises `tools`, `resources` and `prompts`.
 
-- **Tools** (`src/tools.mjs`) — the allow-listed read actions; see
-  [`docs/tools.md`](docs/tools.md).
+- **Tools** (`src/tools.mjs`) — the allow-listed read actions: identity and
+  season context, team and roster reads, race list/overview/result/
+  classification, league standings, rider search and profiles, TransferAI
+  advice, and transfer history/radar. See [`docs/tools.md`](docs/tools.md).
 - **Resources** (`src/resources.mjs`) — `resources/list`, `resources/read` and
   `resources/templates/list` expose the same user- and league-scoped Cycleo
   data as addressable `cycleo://` URIs (`cycleo://team`, `cycleo://teams/{id}`,

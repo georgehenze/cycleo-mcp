@@ -44,7 +44,7 @@ export function getPrompt(name, args = {}) {
     case 'cycleo_team_review':
       return {
         description: 'Review the current Cycleo roster',
-        messages: [message('Call cycleo_get_my_team and review my current Cycleo roster. Highlight underperforming riders, injury risks, and upcoming races where the team looks weak. This is read-only analysis: do not propose actions that change the team.')]
+        messages: [message('Call cycleo_get_my_context and cycleo_get_my_team, and cycleo_get_rankings for where my team sits in the league. Review my current roster: highlight underperforming riders, injury risks, my league position and trend, and upcoming races where the team looks weak. This is read-only analysis: do not propose actions that change the team.')]
       };
     case 'cycleo_transfer_plan': {
       const raceId = requiredId(args.raceId, 'raceId');
@@ -60,7 +60,7 @@ export function getPrompt(name, args = {}) {
       const raceId = requiredId(args.raceId, 'raceId');
       return {
         description: `Preview race ${raceId}`,
-        messages: [message(`Call cycleo_get_race for race ${raceId} and cycleo_get_my_team. Summarise the race, then explain which of my riders are involved and what to watch.`)]
+        messages: [message(`Call cycleo_get_race for race ${raceId} and cycleo_get_my_team. Summarise the race, then explain which of my riders are involved and what to watch. If the race has finished, also call cycleo_get_race_result and cycleo_get_race_classification for race ${raceId} and summarise how my team scored.`)]
       };
     }
     default:

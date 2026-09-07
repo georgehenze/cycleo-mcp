@@ -13,7 +13,12 @@ export const TOOL_DEFINITIONS = [
   { name: 'cycleo_get_race', title: 'Cycleo race overview', description: 'Get a visible Cycleo race and its read-only overview.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_transfer_advice', title: 'TransferAI advice', description: 'Get account-gated TransferAI advice for a visible Cycleo race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, includeOwned: { type: 'boolean', default: false }, allowStarted: { type: 'boolean', default: false } }, additionalProperties: false } },
   { name: 'cycleo_search_riders', title: 'Search Cycleo riders', description: 'Search visible Cycleo riders.', inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string', minLength: 1, maxLength: 100 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT } }, additionalProperties: false } },
-  { name: 'cycleo_get_rider', title: 'Cycleo rider profile', description: 'Get a visible Cycleo rider profile.', inputSchema: { type: 'object', required: ['riderId'], properties: { riderId: { type: 'integer', minimum: 1 } }, additionalProperties: false } }
+  { name: 'cycleo_get_rider', title: 'Cycleo rider profile', description: 'Get a visible Cycleo rider profile.', inputSchema: { type: 'object', required: ['riderId'], properties: { riderId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+  { name: 'cycleo_get_rankings', title: 'Cycleo league standings', description: 'Get the authenticated league standings: the Cycleopunten ranking plus the medal and special rankings.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'cycleo_get_race_result', title: 'Cycleo race result', description: 'Get the authenticated league\'s calculated Cycleo result (points per team) for a visible race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+  { name: 'cycleo_get_race_classification', title: 'Cycleo race classification', description: 'Get the league-enriched final rider classification for a visible race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+  { name: 'cycleo_get_transfer_history', title: 'Cycleo transfer history', description: 'Get the completed transfer history for the authenticated league.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'cycleo_get_transfer_radar', title: 'Cycleo transfer radar', description: 'Get the transfer radar (frequently transferred riders) for the authenticated league.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } }
 ];
 
 function integer(value, fallback = 1) {
@@ -54,7 +59,10 @@ export function validateToolArguments(name, args) {
 export async function callTool(name, args, { api, token, user }) {
   validateToolArguments(name, args);
   switch (name) {
-    case 'cycleo_get_my_context': return user;
+    case 'cycleo_get_my_context': {
+      const season = await api.get('/sidebar/season', token).catch(() => null);
+      return { ...user, season };
+    }
     case 'cycleo_get_my_team': return api.get('/team', token);
     case 'cycleo_get_team': return api.get(`/teams/${integer(args.teamId)}`, token);
     case 'cycleo_get_overview': return api.get('/today', token);
@@ -67,6 +75,11 @@ export async function callTool(name, args, { api, token, user }) {
     });
     case 'cycleo_search_riders': return api.get('/search', token, { q: String(args.query).trim(), limit: limit(args.limit) });
     case 'cycleo_get_rider': return api.get(`/riders/${integer(args.riderId)}`, token);
+    case 'cycleo_get_rankings': return api.get('/rankings/cycleo-points', token);
+    case 'cycleo_get_race_result': return api.get(`/races/${integer(args.raceId)}/cycleo-result`, token);
+    case 'cycleo_get_race_classification': return api.get(`/races/${integer(args.raceId)}/classification`, token);
+    case 'cycleo_get_transfer_history': return api.get('/transfers/history', token);
+    case 'cycleo_get_transfer_radar': return api.get('/transfers/radar', token);
     default: throw Object.assign(new Error(`Unknown tool: ${name}`), { code: 'unknown_tool', jsonRpcCode: -32602 });
   }
 }

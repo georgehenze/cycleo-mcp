@@ -25,13 +25,20 @@ test('resource reads only reach allow-listed GET routes', async () => {
   await readResource('cycleo://team', context);
   await readResource('cycleo://overview', context);
   await readResource('cycleo://races', context);
+  await readResource('cycleo://rankings', context);
+  await readResource('cycleo://transfers/history', context);
+  await readResource('cycleo://transfers/radar', context);
   await readResource('cycleo://teams/42', context);
   await readResource('cycleo://races/2981', context);
   await readResource('cycleo://races/2981/transfer-advice', context);
+  await readResource('cycleo://races/2981/result', context);
+  await readResource('cycleo://races/2981/classification', context);
   await readResource('cycleo://riders/7', context);
 
   assert.deepEqual(calls.map((call) => call.path), [
-    '/team', '/today', '/races', '/teams/42', '/races/2981/overview', '/races/2981/transfer-advice', '/riders/7'
+    '/team', '/today', '/races', '/rankings/cycleo-points', '/transfers/history', '/transfers/radar',
+    '/teams/42', '/races/2981/overview', '/races/2981/transfer-advice',
+    '/races/2981/cycleo-result', '/races/2981/classification', '/riders/7'
   ]);
 });
 
