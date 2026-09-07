@@ -68,9 +68,10 @@ streams and drains in-flight requests before exiting.
 traffic. `GET /mcp` opens the server-to-client `text/event-stream` channel for
 an initialized session (identified by the `Mcp-Session-Id` header); it is held
 open with periodic keep-alive comments, and a session may hold at most four
-concurrent streams (a fifth returns `409`). `DELETE /mcp` terminates a session.
-Every session-scoped response echoes the negotiated `MCP-Protocol-Version`
-header.
+concurrent streams (a fifth returns `409`). `DELETE /mcp` terminates a session
+and closes any streams it still holds; an expired or drained session does the
+same, so keep-alive timers never outlive their session. Every session-scoped
+response echoes the negotiated `MCP-Protocol-Version` header.
 
 Protected-resource metadata (RFC 9728) is served both at
 `/.well-known/oauth-protected-resource` and at the endpoint-suffixed

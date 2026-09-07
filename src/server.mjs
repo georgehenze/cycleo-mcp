@@ -102,12 +102,29 @@ function validateContentType(request) {
   }
 }
 
+function closeStream(entry) {
+  if (entry.closed) return;
+  entry.closed = true;
+  clearInterval(entry.keepAlive);
+  entry.session.streams?.delete(entry);
+  try { entry.response.end(); } catch { /* already torn down */ }
+}
+
+function closeSessionStreams(session) {
+  for (const entry of session.streams ? [...session.streams] : []) closeStream(entry);
+}
+
+function dropSession(sessionId, session) {
+  closeSessionStreams(session);
+  sessions.delete(sessionId);
+}
+
 function cleanState(now = Date.now()) {
   for (const [state, flow] of pending) {
     if (now - flow.created > pendingTtlMs) pending.delete(state);
   }
   for (const [sessionId, session] of sessions) {
-    if (now - session.lastSeen > sessionTtlMs) sessions.delete(sessionId);
+    if (now - session.lastSeen > sessionTtlMs) dropSession(sessionId, session);
   }
   for (const [key, entry] of authCache) {
     if (entry.expires <= now) authCache.delete(key);
@@ -325,20 +342,18 @@ async function handleMcpStream(request, response) {
   });
   response.write(': open\n\n');
 
-  streams.add(response);
-
-  const keepAlive = setInterval(() => {
+  const entry = { response, session, keepAlive: null, closed: false };
+  entry.keepAlive = setInterval(() => {
     session.lastSeen = Date.now();
     response.write(': keep-alive\n\n');
   }, 25000);
-  keepAlive.unref?.();
+  entry.keepAlive.unref?.();
+  streams.add(entry);
 
-  const close = () => {
-    clearInterval(keepAlive);
-    streams.delete(response);
-  };
+  const close = () => closeStream(entry);
   request.on('close', close);
   response.on('close', close);
+  response.on('error', close);
 }
 
 const server = createServer(async (request, response) => {
@@ -401,7 +416,7 @@ const server = createServer(async (request, response) => {
       const { user } = await authenticatedUser(request);
       const { sessionId, session } = requireSession(request, user);
       response.setHeader('mcp-protocol-version', session.protocolVersion);
-      sessions.delete(sessionId);
+      dropSession(sessionId, session);
       return send(response, 204);
     }
     if (request.method === 'GET') return await handleMcpStream(request, response);
@@ -428,9 +443,7 @@ function shutdown(signal) {
   console.log(`Cycleo MCP received ${signal}, draining connections`);
   server.close(() => process.exit(0));
   server.closeIdleConnections?.();
-  for (const session of sessions.values()) {
-    for (const stream of session.streams || []) stream.end();
-  }
+  for (const session of sessions.values()) closeSessionStreams(session);
   setTimeout(() => process.exit(0), 15000).unref();
 }
 

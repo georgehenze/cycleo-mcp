@@ -230,6 +230,27 @@ test('a session may not hold more than four concurrent SSE streams', async () =>
   for (const { controller } of held) controller.abort();
 });
 
+test('deleting a session ends its open SSE streams and frees their slots', async () => {
+  const initialized = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+  const sessionId = initialized.headers.get('mcp-session-id');
+  await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, { sessionId });
+
+  const streamHeaders = { authorization: 'Bearer test-token', accept: 'text/event-stream', 'mcp-session-id': sessionId, 'mcp-protocol-version': '2025-11-25' };
+  const controller = new AbortController();
+  const stream = await fetch(endpoint, { method: 'GET', headers: streamHeaders, signal: controller.signal });
+  const reader = stream.body.getReader();
+  await reader.read();
+
+  const deleted = await fetch(endpoint, { method: 'DELETE', headers: { authorization: 'Bearer test-token', 'mcp-session-id': sessionId, 'mcp-protocol-version': '2025-11-25' } });
+  assert.equal(deleted.status, 204);
+
+  let done = false;
+  for (let i = 0; i < 5 && !done; i += 1) done = (await reader.read()).done;
+  assert.ok(done, 'the server closed the SSE response when the session was deleted');
+
+  controller.abort();
+});
+
 test('transport and tool validation reject unsafe requests before dispatch', async () => {
   const forbiddenOrigin = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } }, { origin: 'https://attacker.example' });
   assert.equal(forbiddenOrigin.status, 403);
