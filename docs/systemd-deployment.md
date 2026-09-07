@@ -21,6 +21,11 @@ should retry idempotent reads during the brief restart window. `Host` headers
 forwarded by that proxy must be `mcp.cycleo.com` (or listed in `ALLOWED_HOSTS`);
 the loopback health check is always allowed.
 
+The server writes one JSON access-log line per request to stderr, captured by
+journald (`journalctl -u cycleo-mcp.service`); set `ACCESS_LOG=off` to disable.
+`/mcp` is rate limited per bearer token (`RATE_LIMIT_PER_MIN`, default 120); if
+the reverse proxy also rate limits, keep the two consistent.
+
 ## One-time server preparation
 
 The service account and SSH deployment account should be separate. The service

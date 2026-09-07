@@ -13,7 +13,14 @@ JSON-RPC `-32602` error.
 
 Every Cycleo API response is read through a byte cap (`CYCLEO_MAX_RESPONSE_BYTES`,
 default 1 MiB); an over-limit response fails with `cycleo_response_too_large`
-rather than being buffered in full.
+rather than being buffered in full. Transient upstream failures (network errors,
+HTTP 429/502/503/504) are retried up to `CYCLEO_MAX_RETRIES` times (default 2)
+with backoff.
+
+A successful `tools/call` returns the Cycleo payload twice: as a JSON string in
+`content[0].text` and as `structuredContent` for clients that consume typed
+output. No `outputSchema` is published because the upstream response shapes are
+not part of this repository's contract.
 
 ## Current team
 

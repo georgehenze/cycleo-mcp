@@ -44,12 +44,23 @@ rejected with `403`. `ALLOWED_HOSTS` is the matching allow-list for the `Host`
 header (DNS-rebinding protection); it defaults to the `OAUTH_RESOURCE` host and
 always permits loopback hosts so the systemd health check keeps working.
 
-Optional hardening/performance knobs: `CYCLEO_MAX_RESPONSE_BYTES` (default
-1 MiB) caps each Cycleo API response; `AUTH_CACHE_TTL_MS` (default 30000) caches
-the `GET /auth/me` identity lookup so repeated MCP calls don't re-hit Cycleo —
-set to `0` to disable, and note a revoked token stays usable until the entry
-expires. On `SIGTERM`/`SIGINT` the server stops accepting connections, ends open
-SSE streams and drains in-flight requests before exiting.
+Optional hardening/performance knobs:
+
+- `CYCLEO_MAX_RESPONSE_BYTES` (default 1 MiB) caps each Cycleo API response.
+- `CYCLEO_MAX_RETRIES` (default 2) retries transient Cycleo failures (network
+  errors and HTTP 429/502/503/504) with exponential backoff and honours
+  `Retry-After`.
+- `AUTH_CACHE_TTL_MS` (default 30000) caches the `GET /auth/me` identity lookup
+  so repeated MCP calls don't re-hit Cycleo — set to `0` to disable, and note a
+  revoked token stays usable until the entry expires.
+- `RATE_LIMIT_PER_MIN` (default 120) is a per-token fixed-window limit on `/mcp`
+  requests; exceeding it returns `429` with a `Retry-After` header. Set to `0`
+  to disable.
+- `ACCESS_LOG` (default on) writes one JSON line per request to stderr; set to
+  `off` to silence it.
+
+On `SIGTERM`/`SIGINT` the server stops accepting connections, ends open SSE
+streams and drains in-flight requests before exiting.
 
 ## Transport
 

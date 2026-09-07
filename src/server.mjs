@@ -22,6 +22,10 @@ const maxPending = 100;
 const maxSessions = 1000;
 const authCacheTtlMs = Number(process.env.AUTH_CACHE_TTL_MS ?? 30000);
 const maxAuthCache = 5000;
+const rateLimitPerMin = Number(process.env.RATE_LIMIT_PER_MIN ?? 120);
+const rateLimitWindowMs = 60 * 1000;
+const maxRateLimitKeys = 10000;
+const accessLog = process.env.ACCESS_LOG !== 'off' && process.env.NODE_ENV !== 'test';
 const supportedProtocolVersions = ['2025-11-25', '2025-06-18', '2025-03-26'];
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGINS || new URL(resource).origin).split(',').map((origin) => origin.trim()).filter(Boolean));
 const allowedHosts = new Set((process.env.ALLOWED_HOSTS || new URL(resource).host).split(',').map((host) => host.trim().toLowerCase()).filter(Boolean));
@@ -30,11 +34,13 @@ const api = new CycleoApi();
 const sessions = new Map();
 const pending = new Map();
 const authCache = new Map();
+const rateBuckets = new Map();
 
 if (!['bearer', 'local'].includes(authMode)) throw new Error('MCP_AUTH_MODE must be bearer or local');
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be an integer from 1 through 65535');
 if (!Number.isFinite(oauthTimeoutMs) || oauthTimeoutMs <= 0) throw new Error('OAUTH_TIMEOUT_MS must be a positive number');
 if (!Number.isFinite(authCacheTtlMs) || authCacheTtlMs < 0) throw new Error('AUTH_CACHE_TTL_MS must be zero or a positive number');
+if (!Number.isFinite(rateLimitPerMin) || rateLimitPerMin < 0) throw new Error('RATE_LIMIT_PER_MIN must be zero or a positive number');
 if (authMode === 'local' && !['127.0.0.1', '::1', 'localhost'].includes(listenHost)) {
   throw new Error('Local authentication mode must bind to a loopback host');
 }
@@ -105,6 +111,40 @@ function cleanState(now = Date.now()) {
   for (const [key, entry] of authCache) {
     if (entry.expires <= now) authCache.delete(key);
   }
+  for (const [key, bucket] of rateBuckets) {
+    if (now - bucket.windowStart > rateLimitWindowMs) rateBuckets.delete(key);
+  }
+}
+
+function tokenKey(token) {
+  return createHash('sha256').update(token).digest('base64url');
+}
+
+function enforceRateLimit(key, now = Date.now()) {
+  if (rateLimitPerMin <= 0) return;
+  let bucket = rateBuckets.get(key);
+  if (!bucket || now - bucket.windowStart > rateLimitWindowMs) {
+    if (rateBuckets.size >= maxRateLimitKeys) rateBuckets.delete(rateBuckets.keys().next().value);
+    bucket = { windowStart: now, count: 0 };
+    rateBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+  if (bucket.count > rateLimitPerMin) {
+    const retryAfter = Math.max(1, Math.ceil((bucket.windowStart + rateLimitWindowMs - now) / 1000));
+    throw Object.assign(new Error('Rate limit exceeded'), { status: 429, code: 'rate_limited', retryAfter });
+  }
+}
+
+function logRequest(request, response, startedAt) {
+  if (!accessLog) return;
+  const line = {
+    at: new Date().toISOString(),
+    method: request.method,
+    path: (request.url || '/').split('?')[0],
+    status: response.statusCode,
+    ms: Math.round(performance.now() - startedAt)
+  };
+  process.stderr.write(`${JSON.stringify(line)}\n`);
 }
 
 async function oauthFetch(url, options) {
@@ -167,16 +207,17 @@ async function readJson(request) {
 async function authenticatedUser(request) {
   const token = tokenFrom(request) || (authMode === 'local' ? await storedAccessToken() : null);
   if (!token) throw Object.assign(new Error('Authentication required'), { status: 401, code: 'authentication_required' });
-  const cacheKey = createHash('sha256').update(token).digest('base64url');
-  const cached = authCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) return { token, user: cached.user };
+  const key = tokenKey(token);
+  enforceRateLimit(key);
+  const cached = authCache.get(key);
+  if (cached && cached.expires > Date.now()) return { token, user: cached.user, key };
   const user = await api.me(token);
   if (user?.id === undefined || user?.id === null) throw new CycleoApiError('Cycleo API returned an invalid user identity');
   if (authCacheTtlMs > 0) {
     if (authCache.size >= maxAuthCache) authCache.delete(authCache.keys().next().value);
-    authCache.set(cacheKey, { user, expires: Date.now() + authCacheTtlMs });
+    authCache.set(key, { user, expires: Date.now() + authCacheTtlMs });
   }
-  return { token, user };
+  return { token, user, key };
 }
 
 function userKey(user) {
@@ -223,8 +264,9 @@ async function handleMcp(request, response) {
   if (body.method === 'tools/list') return send(response, 200, { jsonrpc: '2.0', id, result: { tools: TOOL_DEFINITIONS.map((tool) => ({ ...tool, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true } })) } });
   if (body.method === 'tools/call') {
     try {
-      const result = await callTool(body.params?.name, body.params?.arguments ?? {}, { api, token, user });
-      return send(response, 200, { jsonrpc: '2.0', id, result: { content: [result], isError: false } });
+      const data = await callTool(body.params?.name, body.params?.arguments ?? {}, { api, token, user });
+      const structuredContent = data !== null && typeof data === 'object' && !Array.isArray(data) ? data : { data };
+      return send(response, 200, { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent, isError: false } });
     } catch (error) {
       if (error.jsonRpcCode) return sendRpcError(response, id, error.jsonRpcCode, error.message);
       if (error instanceof CycleoApiError) {
@@ -293,6 +335,8 @@ async function handleMcpStream(request, response) {
 }
 
 const server = createServer(async (request, response) => {
+  const startedAt = performance.now();
+  response.on('finish', () => logRequest(request, response, startedAt));
   try {
     const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
     applyCors(request, response);
@@ -359,8 +403,9 @@ const server = createServer(async (request, response) => {
     const status = error.status || (error instanceof SyntaxError ? 400 : 500);
     if (error instanceof SyntaxError) return sendRpcError(response, null, -32700, 'Parse error', 400);
     if (status === 401) return send(response, 401, { error: { code: error.code, message: error.message } }, { 'www-authenticate': `Bearer resource_metadata="${resource}/.well-known/oauth-protected-resource", scope="cycleo:read"` });
-    if (error instanceof CycleoApiError) return send(response, status, { error: { code: error.code, message: error.message } });
-    return send(response, status, { error: { code: error.code || 'server_error', message: status === 500 ? 'Internal server error' : error.message } });
+    const headers = error.retryAfter ? { 'retry-after': String(error.retryAfter) } : {};
+    if (error instanceof CycleoApiError) return send(response, status, { error: { code: error.code, message: error.message } }, headers);
+    return send(response, status, { error: { code: error.code || 'server_error', message: status === 500 ? 'Internal server error' : error.message } }, headers);
   }
 });
 

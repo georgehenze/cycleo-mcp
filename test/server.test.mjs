@@ -115,6 +115,18 @@ test('resources and prompts are advertised and served over JSON-RPC', async () =
   assert.equal((await badPrompt.json()).error.code, -32602);
 });
 
+test('successful tool calls return both text and structured content', async () => {
+  const initialized = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+  const sessionId = initialized.headers.get('mcp-session-id');
+  await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, { sessionId });
+
+  const called = await post({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cycleo_get_my_team', arguments: {} } }, { sessionId });
+  const result = (await called.json()).result;
+  assert.equal(result.isError, false);
+  assert.deepEqual(result.structuredContent, { ok: true });
+  assert.equal(result.content[0].text, JSON.stringify({ ok: true }));
+});
+
 test('requests with an unrecognised Host header are rejected', async () => {
   const { port } = server.address();
   const spoofed = await new Promise((resolve, reject) => {

@@ -5,10 +5,22 @@ import { CycleoApi, CycleoApiError } from '../src/cycleo-api.mjs';
 
 let upstream;
 let baseUrl;
+const attempts = new Map();
 
 before(async () => {
   upstream = createServer((request, response) => {
     if (request.url === '/slow') return;
+    if (request.url.startsWith('/flaky')) {
+      const seen = (attempts.get(request.url) ?? 0) + 1;
+      attempts.set(request.url, seen);
+      const failFor = Number(new URL(request.url, baseUrl).searchParams.get('fail') || 0);
+      if (seen <= failFor) {
+        response.writeHead(503, { 'content-type': 'application/json', 'retry-after': '0' });
+        return response.end(JSON.stringify({ error: { code: 'unavailable', message: 'try later' } }));
+      }
+      response.writeHead(200, { 'content-type': 'application/json' });
+      return response.end(JSON.stringify({ data: { attempts: seen } }));
+    }
     response.writeHead(request.url === '/fail' ? 403 : 200, { 'content-type': 'application/json' });
     if (request.url === '/fail') return response.end(JSON.stringify({ error: { code: 'forbidden', message: 'Not visible' } }));
     if (request.url === '/huge') return response.end(JSON.stringify({ data: { blob: 'x'.repeat(200000) } }));
@@ -45,4 +57,14 @@ test('Cycleo API client caps oversized responses', async () => {
   await assert.rejects(client.get('/huge', 'secret'), { status: 502, code: 'cycleo_response_too_large' });
   const ok = await client.get('/races', 'secret');
   assert.equal(ok.url, '/races');
+});
+
+test('Cycleo API client retries transient failures then gives up', async () => {
+  const client = new CycleoApi({ baseUrl, maxRetries: 2 });
+
+  const recovered = await client.get('/flaky?fail=2', 'secret');
+  assert.equal(recovered.attempts, 3, 'succeeds on the third attempt');
+
+  await assert.rejects(client.get('/flaky?fail=9', 'secret'), { status: 503, code: 'unavailable' });
+  assert.equal(attempts.get('/flaky?fail=9'), 3, 'one initial call plus two retries');
 });

@@ -1,7 +1,5 @@
 const MAX_LIMIT = 50;
 
-const text = (value) => ({ type: 'text', text: JSON.stringify(value) });
-
 function invalidArguments(message) {
   return Object.assign(new Error(message), { code: 'invalid_params', jsonRpcCode: -32602 });
 }
@@ -56,19 +54,19 @@ export function validateToolArguments(name, args) {
 export async function callTool(name, args, { api, token, user }) {
   validateToolArguments(name, args);
   switch (name) {
-    case 'cycleo_get_my_context': return text(user);
-    case 'cycleo_get_my_team': return text(await api.get('/team', token));
-    case 'cycleo_get_team': return text(await api.get(`/teams/${integer(args.teamId)}`, token));
-    case 'cycleo_get_overview': return text(await api.get('/today', token));
-    case 'cycleo_list_races': return text(await api.get('/races', token, { page: integer(args.page), limit: limit(args.limit) }));
-    case 'cycleo_get_race': return text(await api.get(`/races/${integer(args.raceId)}/overview`, token));
-    case 'cycleo_get_transfer_advice': return text(await api.get(`/races/${integer(args.raceId)}/transfer-advice`, token, {
+    case 'cycleo_get_my_context': return user;
+    case 'cycleo_get_my_team': return api.get('/team', token);
+    case 'cycleo_get_team': return api.get(`/teams/${integer(args.teamId)}`, token);
+    case 'cycleo_get_overview': return api.get('/today', token);
+    case 'cycleo_list_races': return api.get('/races', token, { page: integer(args.page), limit: limit(args.limit) });
+    case 'cycleo_get_race': return api.get(`/races/${integer(args.raceId)}/overview`, token);
+    case 'cycleo_get_transfer_advice': return api.get(`/races/${integer(args.raceId)}/transfer-advice`, token, {
       limit: args.limit === undefined ? undefined : limit(args.limit),
       include_owned: args.includeOwned === true ? 1 : undefined,
       allow_started: args.allowStarted === true ? 1 : undefined
-    }));
-    case 'cycleo_search_riders': return text(await api.get('/search', token, { q: String(args.query).trim(), limit: limit(args.limit) }));
-    case 'cycleo_get_rider': return text(await api.get(`/riders/${integer(args.riderId)}`, token));
+    });
+    case 'cycleo_search_riders': return api.get('/search', token, { q: String(args.query).trim(), limit: limit(args.limit) });
+    case 'cycleo_get_rider': return api.get(`/riders/${integer(args.riderId)}`, token);
     default: throw Object.assign(new Error(`Unknown tool: ${name}`), { code: 'unknown_tool', jsonRpcCode: -32602 });
   }
 }
