@@ -327,6 +327,7 @@ async function handleMcp(request, response) {
     return isNotification ? send(response, 202) : sendRpcError(response, id, -32600, 'Invalid Request');
   }
   if (body.method === 'initialize') {
+    if (isNotification) return send(response, 202);
     if (typeof body.params?.protocolVersion !== 'string') return sendRpcError(response, id, -32602, 'protocolVersion is required');
     cleanState();
     if (sessions.size >= maxSessions) throw Object.assign(new Error('Too many active MCP sessions'), { status: 503, code: 'session_capacity_reached' });
@@ -337,12 +338,10 @@ async function handleMcp(request, response) {
   }
   const { session } = requireSession(request, user);
   response.setHeader('mcp-protocol-version', session.protocolVersion);
-  if (body.method === 'notifications/initialized') {
-    session.initialized = true;
-    return send(response, 202);
-  }
   if (isNotification) {
-    if (body.method === 'notifications/cancelled') {
+    if (body.method === 'notifications/initialized') {
+      session.initialized = true;
+    } else if (body.method === 'notifications/cancelled') {
       const cancelledId = body.params?.requestId;
       if (cancelledId !== undefined) session.inFlight?.get(cancelledId)?.abort(new DOMException('Cancelled by client', 'AbortError'));
     }

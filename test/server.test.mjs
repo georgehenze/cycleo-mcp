@@ -106,8 +106,26 @@ test('MCP sessions are negotiated, user-bound, initialized and terminable', asyn
 });
 
 test('JSON-RPC notifications are acknowledged without a response body', async () => {
+  const idlessInitialize = await post({ jsonrpc: '2.0', method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+  assert.equal(idlessInitialize.status, 202);
+  assert.equal(await idlessInitialize.text(), '');
+  assert.equal(idlessInitialize.headers.get('mcp-session-id'), null, 'an initialize notification must not create a client session');
+  assert.equal(idlessInitialize.headers.get('mcp-protocol-version'), null);
+
+  const nullIdInitialize = await post({ jsonrpc: '2.0', id: null, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+  assert.equal(nullIdInitialize.status, 200, 'an explicit null id remains a request, not an id-less notification');
+  const nullIdSession = nullIdInitialize.headers.get('mcp-session-id');
+  assert.ok(nullIdSession);
+  await fetch(endpoint, { method: 'DELETE', headers: { authorization: 'Bearer test-token', 'mcp-session-id': nullIdSession } });
+
   const initialized = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
   const sessionId = initialized.headers.get('mcp-session-id');
+
+  const requestShapedNotification = await post({ jsonrpc: '2.0', id: 2, method: 'notifications/initialized' }, { sessionId });
+  assert.equal((await requestShapedNotification.json()).error.code, -32002);
+  const stillUninitialized = await post({ jsonrpc: '2.0', id: 3, method: 'tools/list' }, { sessionId });
+  assert.equal((await stillUninitialized.json()).error.code, -32002, 'an id-bearing notification method must not mutate session state');
+
   await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, { sessionId });
 
   const cancelled = await post({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 42, reason: 'user aborted' } }, { sessionId });

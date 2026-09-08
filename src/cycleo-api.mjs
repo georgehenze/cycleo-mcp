@@ -17,7 +17,21 @@ export class CycleoApiError extends Error {
   }
 }
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    let timeout;
+    const cancelled = () => {
+      clearTimeout(timeout);
+      reject(new CycleoApiError('Cycleo API request was cancelled', 499, 'cycleo_cancelled'));
+    };
+    if (signal?.aborted) return cancelled();
+    timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', cancelled);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', cancelled, { once: true });
+  });
+}
 
 function retryAfterMsFrom(header) {
   if (!header) return undefined;
@@ -110,7 +124,7 @@ export class CycleoApi {
         const delay = error.retryAfterMs === undefined
           ? backoff
           : Math.min(MAX_RETRY_AFTER_MS, error.retryAfterMs);
-        await sleep(delay);
+        await sleep(delay, signal);
       }
     }
   }

@@ -6,10 +6,19 @@ import { CycleoApi, CycleoApiError } from '../src/cycleo-api.mjs';
 let upstream;
 let baseUrl;
 const attempts = new Map();
+let retryAfterAttempts = 0;
+let retryAfterObserved;
 
 before(async () => {
   upstream = createServer((request, response) => {
     if (request.url === '/slow') return;
+    if (request.url === '/retry-after') {
+      retryAfterAttempts += 1;
+      response.writeHead(503, { 'content-type': 'application/json', 'retry-after': '2' });
+      response.end(JSON.stringify({ error: { code: 'unavailable', message: 'try later' } }));
+      retryAfterObserved?.();
+      return;
+    }
     if (request.url.startsWith('/flaky')) {
       const seen = (attempts.get(request.url) ?? 0) + 1;
       attempts.set(request.url, seen);
@@ -79,4 +88,24 @@ test('Cycleo API client stops an in-flight request when its signal is aborted', 
     assert.equal(error.code, 'cycleo_cancelled');
     return true;
   });
+});
+
+test('Cycleo API client stops Retry-After backoff when its signal is aborted', async () => {
+  const client = new CycleoApi({ baseUrl, timeoutMs: 5000, maxRetries: 1 });
+  const controller = new AbortController();
+  const responseObserved = new Promise((resolve) => { retryAfterObserved = resolve; });
+  retryAfterAttempts = 0;
+  const started = Date.now();
+  const pending = client.get('/retry-after', 'secret', {}, { signal: controller.signal });
+  await responseObserved;
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  controller.abort();
+  await assert.rejects(pending, (error) => {
+    assert.ok(error instanceof CycleoApiError);
+    assert.equal(error.code, 'cycleo_cancelled');
+    return true;
+  });
+  retryAfterObserved = undefined;
+  assert.ok(Date.now() - started < 500, 'cancellation must not wait for the two-second Retry-After delay');
+  assert.equal(retryAfterAttempts, 1, 'cancellation prevents the retry attempt');
 });
