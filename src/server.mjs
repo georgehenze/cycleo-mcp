@@ -117,6 +117,10 @@ function closeSessionStreams(session) {
 }
 
 function dropSession(sessionId, session) {
+  for (const controller of session.inFlight?.values() || []) {
+    controller.abort(new DOMException('MCP session ended', 'AbortError'));
+  }
+  session.inFlight?.clear();
   closeSessionStreams(session);
   sessions.delete(sessionId);
 }

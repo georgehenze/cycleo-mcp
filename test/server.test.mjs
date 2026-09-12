@@ -6,6 +6,7 @@ let upstream;
 let server;
 let endpoint;
 const upstreamCalls = [];
+let slowTeamRequestObserved;
 
 before(async () => {
   upstream = createServer((request, response) => {
@@ -27,6 +28,10 @@ before(async () => {
       const id = request.headers.authorization === 'Bearer backend-other-token' ? 2 : 1;
       response.writeHead(200, { 'content-type': 'application/json' });
       return response.end(JSON.stringify({ data: { id, league_id: 10 } }));
+    }
+    if (request.url === '/team' && slowTeamRequestObserved) {
+      slowTeamRequestObserved();
+      return;
     }
     response.writeHead(200, { 'content-type': 'application/json' });
     return response.end(JSON.stringify({ data: { ok: true } }));
@@ -301,6 +306,24 @@ test('deleting a session ends its open SSE streams and frees their slots', async
   assert.ok(done, 'the server closed the SSE response when the session was deleted');
 
   controller.abort();
+});
+
+test('deleting a session cancels an in-flight tool request', async () => {
+  const initialized = await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25' } });
+  const sessionId = initialized.headers.get('mcp-session-id');
+  await post({ jsonrpc: '2.0', method: 'notifications/initialized' }, { sessionId });
+
+  const requestReached = new Promise((resolve) => { slowTeamRequestObserved = resolve; });
+  const toolCall = post({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'cycleo_get_my_team', arguments: {} } }, { sessionId });
+  await requestReached;
+
+  const deleted = await fetch(endpoint, { method: 'DELETE', headers: { authorization: 'Bearer test-token', 'mcp-session-id': sessionId, 'mcp-protocol-version': '2025-11-25' } });
+  assert.equal(deleted.status, 204);
+
+  const response = await toolCall;
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), '', 'a request cancelled by session teardown must not produce a JSON-RPC response');
+  slowTeamRequestObserved = undefined;
 });
 
 test('transport and tool validation reject unsafe requests before dispatch', async () => {
