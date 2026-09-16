@@ -55,6 +55,13 @@ test('cycleo_get_my_context enriches identity with the season snapshot', async (
   assert.deepEqual(result.season, { season: 2026 });
 });
 
+test('cycleo_get_my_context passes through the subscription status from /auth/me', async () => {
+  const api = { get: async () => null };
+  const subscription = { status: 'actief', active: true, type: 'premium', startDate: '2026-01-01', endDate: '2026-12-31' };
+  const result = await callTool('cycleo_get_my_context', {}, { api, token: 't', user: { id: 7, subscription } });
+  assert.deepEqual(result.subscription, subscription);
+});
+
 test('cycleo_get_my_context still returns identity when the season snapshot fails', async () => {
   const api = { get: async () => { throw new Error('upstream down'); } };
   const result = await callTool('cycleo_get_my_context', {}, { api, token: 't', user: { id: 7 } });

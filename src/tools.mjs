@@ -5,7 +5,7 @@ function invalidArguments(message) {
 }
 
 export const TOOL_DEFINITIONS = [
-  { name: 'cycleo_get_my_context', title: 'My Cycleo context', description: 'Get the authenticated Cycleo user, team and league context.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'cycleo_get_my_context', title: 'My Cycleo context', description: 'Get the authenticated Cycleo user, team, league context and subscription status.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'cycleo_get_my_team', title: 'My Cycleo team', description: 'Get the authenticated Cycleo user\'s current team roster.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'cycleo_get_team', title: 'Cycleo team by ID', description: 'Get a visible Cycleo team and its current roster.', inputSchema: { type: 'object', required: ['teamId'], properties: { teamId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_overview', title: 'My Cycleo overview', description: 'Get the authenticated Cycleo front-page overview.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },

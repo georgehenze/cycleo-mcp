@@ -61,10 +61,14 @@ authenticated user's league and returns `team_not_found` otherwise.
 ## Context, standings and results
 
 `cycleo_get_my_context` returns the `GET /auth/me` identity (user, team,
-league, entitlements) and attaches a `season` snapshot from
-`GET /sidebar/season` (points remaining, race progress, transfers used and
-remaining). If the snapshot call fails the tool still returns the identity with
-`season: null`.
+league, entitlements, `subscription` status) and attaches a `season` snapshot
+from `GET /sidebar/season` (points remaining, race progress, transfers used
+and remaining). If the snapshot call fails the tool still returns the identity
+with `season: null`.
+
+`subscription` (`status`, `active`, `type`, `startDate`, `endDate`) comes
+straight through from `/auth/me` — the tool does not call a separate
+entitlements endpoint, so it stays whatever shape the Cycleo API returns.
 
 `cycleo_get_rankings` calls `GET /rankings/cycleo-points` for the authenticated
 league: the Cycleopunten table plus the medal table and the embedded special
