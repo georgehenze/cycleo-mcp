@@ -15,6 +15,7 @@ test('tool handlers only call allow-listed GET routes', async () => {
   await callTool('cycleo_get_overview', {}, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_list_races', { limit: 50 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_transfer_advice', { raceId: 2981, limit: 12, includeOwned: true, allowStarted: true }, { api, token: 't', user: { id: 1 } });
+  await callTool('cycleo_get_rider_startlist_races', { riderId: 7 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_rankings', {}, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_race_result', { raceId: 2981 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_race_classification', { raceId: 2981 }, { api, token: 't', user: { id: 1 } });
@@ -22,14 +23,22 @@ test('tool handlers only call allow-listed GET routes', async () => {
   await callTool('cycleo_get_transfer_statistics', { userId: 42 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_transfer_radar', {}, { api, token: 't', user: { id: 1 } });
   assert.deepEqual(calls.map((call) => call.path), [
-    '/team', '/teams/42', '/today', '/races', '/races/2981/transfer-advice',
+    '/team', '/teams/42', '/today', '/races', '/races/2981/transfer-advice', '/riders/7/upcoming-races',
     '/rankings/cycleo-points', '/races/2981/cycleo-result', '/races/2981/classification',
     '/transfers/history', '/transfers/statistics', '/transfers/radar'
   ]);
   assert.equal(calls[3].query.limit, 50);
   assert.deepEqual(calls[4].query, { limit: 12, include_owned: 1, allow_started: 1 });
-  assert.deepEqual(calls[9].query, { user_id: 42 });
-  assert.deepEqual(calls[8].query, { page: 1, limit: 5 });
+  assert.deepEqual(calls[10].query, { user_id: 42 });
+  assert.deepEqual(calls[9].query, { page: 1, limit: 5 });
+});
+
+test('cycleo_get_rider_startlist_races requires a positive numeric rider ID', async () => {
+  const calls = [];
+  const api = { get: async (path) => { calls.push(path); return { path }; } };
+  await callTool('cycleo_get_rider_startlist_races', { riderId: 7 }, { api, token: 't', user: { id: 1 } });
+  assert.deepEqual(calls, ['/riders/7/upcoming-races']);
+  await assert.rejects(callTool('cycleo_get_rider_startlist_races', { riderId: 0 }, { api, token: 't', user: { id: 1 } }), { code: 'invalid_params' });
 });
 
 test('cycleo_search_riders pins the search type, drops the ignored limit and returns only riders', async () => {

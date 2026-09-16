@@ -37,6 +37,7 @@ not part of this repository's contract.
 | `cycleo_get_transfer_advice` | `GET /races/{raceId}/transfer-advice` | `raceId`, `limit`, `includeOwned`, `allowStarted` |
 | `cycleo_search_riders` | `GET /search` | `query` |
 | `cycleo_get_rider` | `GET /riders/{riderId}` | `riderId` |
+| `cycleo_get_rider_startlist_races` | `GET /riders/{riderId}/upcoming-races` | `riderId` |
 | `cycleo_get_rankings` | `GET /rankings/cycleo-points` | — |
 | `cycleo_get_race_result` | `GET /races/{raceId}/cycleo-result` | `raceId` |
 | `cycleo_get_race_classification` | `GET /races/{raceId}/classification` | `raceId` |
@@ -88,6 +89,15 @@ return nothing), matches on rider name and professional team, ignores any
 `limit`, and returns at most six riders. The tool therefore takes only `query`
 (2–80 characters) and returns `{ riders: [...] }`; races and teams from the
 shared search route are not exposed.
+
+## Rider start-list races
+
+`cycleo_get_rider_startlist_races` answers “Which races is this rider on the
+start list for?” directly. First call `cycleo_search_riders` when the question
+contains a name, then pass the selected result's `id` as `riderId`. The tool
+returns every current or upcoming not-yet-calculated race where the rider has
+a non-withdrawn start-list entry; it does not infer a programme from race
+calendars.
 
 ## Transfers
 

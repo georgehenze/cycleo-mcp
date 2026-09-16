@@ -14,6 +14,7 @@ export const TOOL_DEFINITIONS = [
   { name: 'cycleo_get_transfer_advice', title: 'TransferAI advice', description: 'Get account-gated TransferAI advice for a visible Cycleo race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, includeOwned: { type: 'boolean', default: false }, allowStarted: { type: 'boolean', default: false } }, additionalProperties: false } },
   { name: 'cycleo_search_riders', title: 'Search Cycleo riders', description: 'Search visible Cycleo riders by name or professional team. The query needs at least two characters; the Cycleo API returns at most six riders.', inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string', minLength: 2, maxLength: 80 } }, additionalProperties: false } },
   { name: 'cycleo_get_rider', title: 'Cycleo rider profile', description: 'Get a visible Cycleo rider profile.', inputSchema: { type: 'object', required: ['riderId'], properties: { riderId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+  { name: 'cycleo_get_rider_startlist_races', title: 'Rider start-list races', description: 'List every current or upcoming not-yet-calculated Cycleo race whose start list includes this rider. Use cycleo_search_riders first when only a rider name is known.', inputSchema: { type: 'object', required: ['riderId'], properties: { riderId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_rankings', title: 'Cycleo league standings', description: 'Get the authenticated league standings: the Cycleopunten ranking plus the medal and special rankings.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { name: 'cycleo_get_race_result', title: 'Cycleo race result', description: 'Get the authenticated league\'s calculated Cycleo result (points per team) for a visible race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_race_classification', title: 'Cycleo race classification', description: 'Get the league-enriched final rider classification for a visible race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
@@ -83,6 +84,7 @@ export async function callTool(name, args, { api, token, user }) {
       return { riders: results?.riders ?? [] };
     }
     case 'cycleo_get_rider': return api.get(`/riders/${integer(args.riderId)}`, token);
+    case 'cycleo_get_rider_startlist_races': return api.get(`/riders/${integer(args.riderId)}/upcoming-races`, token);
     case 'cycleo_get_rankings': return api.get('/rankings/cycleo-points', token);
     case 'cycleo_get_race_result': return api.get(`/races/${integer(args.raceId)}/cycleo-result`, token);
     case 'cycleo_get_race_classification': return api.get(`/races/${integer(args.raceId)}/classification`, token);
