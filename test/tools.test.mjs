@@ -19,14 +19,16 @@ test('tool handlers only call allow-listed GET routes', async () => {
   await callTool('cycleo_get_race_result', { raceId: 2981 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_race_classification', { raceId: 2981 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_transfer_history', { limit: 5 }, { api, token: 't', user: { id: 1 } });
+  await callTool('cycleo_get_transfer_statistics', { userId: 42 }, { api, token: 't', user: { id: 1 } });
   await callTool('cycleo_get_transfer_radar', {}, { api, token: 't', user: { id: 1 } });
   assert.deepEqual(calls.map((call) => call.path), [
     '/team', '/teams/42', '/today', '/races', '/races/2981/transfer-advice',
     '/rankings/cycleo-points', '/races/2981/cycleo-result', '/races/2981/classification',
-    '/transfers/history', '/transfers/radar'
+    '/transfers/history', '/transfers/statistics', '/transfers/radar'
   ]);
   assert.equal(calls[3].query.limit, 50);
   assert.deepEqual(calls[4].query, { limit: 12, include_owned: 1, allow_started: 1 });
+  assert.deepEqual(calls[9].query, { user_id: 42 });
   assert.deepEqual(calls[8].query, { page: 1, limit: 5 });
 });
 

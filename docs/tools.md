@@ -41,6 +41,7 @@ not part of this repository's contract.
 | `cycleo_get_race_result` | `GET /races/{raceId}/cycleo-result` | `raceId` |
 | `cycleo_get_race_classification` | `GET /races/{raceId}/classification` | `raceId` |
 | `cycleo_get_transfer_history` | `GET /transfers/history` | `limit`, `page` |
+| `cycleo_get_transfer_statistics` | `GET /transfers/statistics` | `userId` (optional) |
 | `cycleo_get_transfer_radar` | `GET /transfers/radar` | — |
 
 All routes resolve identity and league from the bearer token
@@ -95,6 +96,11 @@ no rider prices, so there is no market or valuation tool.
 `page` (default 1); the full league history for an admin spans a whole season
 and would otherwise exceed `CYCLEO_MAX_RESPONSE_BYTES`. Results are newest
 first.
+
+`cycleo_get_transfer_statistics` returns the current-season completed-transfer
+total and counts per user in the authenticated league. Pass `userId` to
+return the count for one user; IDs outside the authenticated league return an
+empty user list. The tool never accepts a league ID.
 
 ## TransferAI
 

@@ -18,6 +18,7 @@ export const TOOL_DEFINITIONS = [
   { name: 'cycleo_get_race_result', title: 'Cycleo race result', description: 'Get the authenticated league\'s calculated Cycleo result (points per team) for a visible race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_race_classification', title: 'Cycleo race classification', description: 'Get the league-enriched final rider classification for a visible race.', inputSchema: { type: 'object', required: ['raceId'], properties: { raceId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_transfer_history', title: 'Cycleo transfer history', description: 'Get the completed transfer history for the authenticated league, most recent first.', inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: MAX_LIMIT }, page: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
+  { name: 'cycleo_get_transfer_statistics', title: 'Cycleo transfer statistics', description: 'Get current-season completed-transfer totals for the authenticated league, optionally for one user in that league.', inputSchema: { type: 'object', properties: { userId: { type: 'integer', minimum: 1 } }, additionalProperties: false } },
   { name: 'cycleo_get_transfer_radar', title: 'Cycleo transfer radar', description: 'Get the transfer radar (frequently transferred riders) for the authenticated league.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } }
 ];
 
@@ -86,6 +87,7 @@ export async function callTool(name, args, { api, token, user }) {
     case 'cycleo_get_race_result': return api.get(`/races/${integer(args.raceId)}/cycleo-result`, token);
     case 'cycleo_get_race_classification': return api.get(`/races/${integer(args.raceId)}/classification`, token);
     case 'cycleo_get_transfer_history': return api.get('/transfers/history', token, { page: integer(args.page), limit: limit(args.limit) });
+    case 'cycleo_get_transfer_statistics': return api.get('/transfers/statistics', token, { user_id: args.userId === undefined ? undefined : integer(args.userId) });
     case 'cycleo_get_transfer_radar': return api.get('/transfers/radar', token);
     default: throw Object.assign(new Error(`Unknown tool: ${name}`), { code: 'unknown_tool', jsonRpcCode: -32602 });
   }
