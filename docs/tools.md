@@ -98,7 +98,7 @@ and would otherwise exceed `CYCLEO_MAX_RESPONSE_BYTES`. Results are newest
 first.
 
 `cycleo_get_transfer_statistics` returns the current-season completed-transfer
-total and counts per user in the authenticated league. Pass `userId` to
+total and counts per active user in the authenticated league. Pass `userId` to
 return the count for one user; IDs outside the authenticated league return an
 empty user list. The tool never accepts a league ID.
 
