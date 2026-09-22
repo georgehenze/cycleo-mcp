@@ -28,6 +28,7 @@ not part of this repository's contract.
 
 | Tool | Cycleo route | Arguments |
 | --- | --- | --- |
+| `cycleo_get_current_time` | Server clock | — |
 | `cycleo_get_my_context` | `GET /auth/me` + `GET /sidebar/season` | — |
 | `cycleo_get_my_team` | `GET /team` | — |
 | `cycleo_get_team` | `GET /teams/{teamId}` | `teamId` |
@@ -35,6 +36,7 @@ not part of this repository's contract.
 | `cycleo_list_races` | `GET /races` | `limit`, `page` |
 | `cycleo_get_race` | `GET /races/{raceId}/overview` | `raceId` |
 | `cycleo_get_transfer_advice` | `GET /races/{raceId}/transfer-advice` | `raceId`, `limit`, `includeOwned`, `allowStarted` |
+| `cycleo_search_entities` | `GET /search` | `query`, `entityType` (optional: `all`, `rider`, `race`, `team`) |
 | `cycleo_search_riders` | `GET /search` | `query` |
 | `cycleo_get_rider` | `GET /riders/{riderId}` | `riderId` |
 | `cycleo_get_rider_startlist_races` | `GET /riders/{riderId}/upcoming-races` | `riderId` |
@@ -47,6 +49,15 @@ not part of this repository's contract.
 
 All routes resolve identity and league from the bearer token
 (`mobileApiRequireAuthenticatedUser`); no argument can widen that scope.
+
+## Current time
+
+`cycleo_get_current_time` does not call the Cycleo API. It returns the MCP
+server's current clock as `utc` (ISO 8601), `unixSeconds`, and a local
+`localDate`, `localTime` and `localDateTime` together with the server's IANA
+`timeZone`. Use `utc` for an absolute instant and use the local fields only
+with the returned timezone; the local date is server-local, not automatically
+the user's device timezone.
 
 ## Current team
 
@@ -83,6 +94,14 @@ positive `raceId` and stay within the caller's league.
 
 ## Rider search
 
+`cycleo_search_entities` resolves names to IDs for follow-up questions. It
+returns up to six riders, race editions and teams per category by default;
+`entityType` can limit the search to `rider`, `race` or `team`. Rider and team
+results use `id` with their corresponding tools. Race matches contain both the
+race definition `id` and the season-specific `editionId`; use `editionId` with
+race tools such as `cycleo_get_race` and `cycleo_get_transfer_advice`. Team
+matches are restricted to visible teams in the authenticated user's league.
+
 `cycleo_search_riders` calls `GET /search` with the query pinned to
 `type=renner`. The Cycleo API requires at least two characters (shorter queries
 return nothing), matches on rider name and professional team, ignores any
@@ -93,7 +112,8 @@ shared search route are not exposed.
 ## Rider start-list races
 
 `cycleo_get_rider_startlist_races` answers “Which races is this rider on the
-start list for?” directly. First call `cycleo_search_riders` when the question
+start list for?” directly. First call `cycleo_search_entities` (or the
+backward-compatible `cycleo_search_riders`) when the question
 contains a name, then pass the selected result's `id` as `riderId`. The tool
 returns every current or upcoming not-yet-calculated race where the rider has
 a non-withdrawn start-list entry; it does not infer a programme from race

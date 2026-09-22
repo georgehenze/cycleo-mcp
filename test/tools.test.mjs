@@ -7,6 +7,16 @@ test('all initial tools are explicitly read-only', () => {
   for (const tool of TOOL_DEFINITIONS) assert.equal(tool.inputSchema.additionalProperties, false);
 });
 
+test('cycleo_get_current_time returns an unambiguous UTC and server-local clock', async () => {
+  const result = await callTool('cycleo_get_current_time', {}, { api: {}, token: 't', user: { id: 1 } });
+  assert.match(result.utc, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  assert.equal(result.unixSeconds, Math.floor(Date.parse(result.utc) / 1000));
+  assert.match(result.timeZone, /^\S+$/);
+  assert.match(result.localDate, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(result.localTime, /^\d{2}:\d{2}:\d{2}$/);
+  assert.equal(result.localDateTime, `${result.localDate}T${result.localTime}`);
+});
+
 test('tool handlers only call allow-listed GET routes', async () => {
   const calls = [];
   const api = { get: async (path, token, query) => { calls.push({ path, token, query }); return { path }; } };
