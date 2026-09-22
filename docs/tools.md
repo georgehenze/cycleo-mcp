@@ -28,12 +28,12 @@ not part of this repository's contract.
 
 | Tool | Cycleo route | Arguments |
 | --- | --- | --- |
-| `cycleo_get_current_time` | Server clock | — |
+| `cycleo_get_current_time` | Server clock | `timeZone` (optional IANA timezone) |
 | `cycleo_get_my_context` | `GET /auth/me` + `GET /sidebar/season` | — |
 | `cycleo_get_my_team` | `GET /team` | — |
 | `cycleo_get_team` | `GET /teams/{teamId}` | `teamId` |
 | `cycleo_get_overview` | `GET /today` | — |
-| `cycleo_list_races` | `GET /races` | `limit`, `page` |
+| `cycleo_list_races` | `GET /races` | `year`, `status`, `limit`, `page` |
 | `cycleo_get_race` | `GET /races/{raceId}/overview` | `raceId` |
 | `cycleo_get_transfer_advice` | `GET /races/{raceId}/transfer-advice` | `raceId`, `limit`, `includeOwned`, `allowStarted` |
 | `cycleo_search_entities` | `GET /search` | `query`, `entityType` (optional: `all`, `rider`, `race`, `team`) |
@@ -43,6 +43,7 @@ not part of this repository's contract.
 | `cycleo_get_rankings` | `GET /rankings/cycleo-points` | — |
 | `cycleo_get_race_result` | `GET /races/{raceId}/cycleo-result` | `raceId` |
 | `cycleo_get_race_classification` | `GET /races/{raceId}/classification` | `raceId` |
+| `cycleo_get_race_startlist` | `GET /races/{raceId}/startlist` | `raceId` |
 | `cycleo_get_transfer_history` | `GET /transfers/history` | `limit`, `page` |
 | `cycleo_get_transfer_statistics` | `GET /transfers/statistics` | `userId` (optional) |
 | `cycleo_get_transfer_radar` | `GET /transfers/radar` | — |
@@ -54,10 +55,12 @@ All routes resolve identity and league from the bearer token
 
 `cycleo_get_current_time` does not call the Cycleo API. It returns the MCP
 server's current clock as `utc` (ISO 8601), `unixSeconds`, and a local
-`localDate`, `localTime` and `localDateTime` together with the server's IANA
-`timeZone`. Use `utc` for an absolute instant and use the local fields only
-with the returned timezone; the local date is server-local, not automatically
-the user's device timezone.
+`localDate`, `localTime` and `localDateTime` together with the IANA `timeZone`
+used to format those local fields. Pass an optional `timeZone` such as
+`Europe/Amsterdam` to format them in the client's timezone; when omitted, the
+server's timezone is used. Invalid timezone identifiers are rejected as
+invalid arguments. Use `utc` for an absolute instant; the UTC and Unix values
+are unchanged by the requested timezone.
 
 ## Current team
 
@@ -71,6 +74,12 @@ The Cycleo API restricts the result to active, visible teams in the
 authenticated user's league and returns `team_not_found` otherwise.
 
 ## Context, standings and results
+
+`cycleo_list_races` accepts an optional `year` (2000–2100; defaults to the
+current year) and `status` (`all`, `upcoming`, `active`, `completed` or
+`cancelled`; defaults to `all`), along with `limit` and `page`. Upcoming races
+have not started, active races include today, and completed races ended before
+today. The tool caps `limit` at 50 to keep responses bounded.
 
 `cycleo_get_my_context` returns the `GET /auth/me` identity (user, team,
 league, entitlements, `subscription` status) and attaches a `season` snapshot
@@ -91,6 +100,13 @@ league's calculated Cycleo points per team for one race;
 `cycleo_get_race_classification` (`GET /races/{raceId}/classification`) returns
 the final rider classification enriched with league ownership. Both take a
 positive `raceId` and stay within the caller's league.
+
+`cycleo_get_race_startlist` (`GET /races/{raceId}/startlist`) returns the full
+start list, including bib numbers, withdrawal status, pro teams and current
+ownership in the authenticated user's league. It also includes rider stats and
+transfer context. The endpoint is not paginated. When only a race name is
+known, use `cycleo_search_entities` with `entityType=race` and pass the matched
+edition's `editionId` as `raceId`.
 
 ## Rider search
 
