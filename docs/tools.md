@@ -17,7 +17,15 @@ rather than being buffered in full. Transient upstream failures (network errors,
 HTTP 429/502/503/504) are retried up to `CYCLEO_MAX_RETRIES` times (default 2).
 Exponential backoff is capped at two seconds, but an explicit `Retry-After`
 response header is honoured up to 30 seconds so the client actually backs off
-while Cycleo is throttling.
+while Cycleo is throttling. A 503 with code `maintenance` (Cycleo maintenance
+mode) is not retried: tool calls return it as an `isError` result at once, and
+if it happens during authentication the MCP response carries Cycleo's
+`Retry-After`.
+
+Accounts that Cycleo has flagged for a required password change get
+`403 password_change_required` from every API route, including `/auth/me`, so
+the MCP request fails with that code until the user sets a new password in
+Cycleo.
 
 A successful `tools/call` returns the Cycleo payload twice: as a JSON string in
 `content[0].text` and as `structuredContent` for clients that consume typed

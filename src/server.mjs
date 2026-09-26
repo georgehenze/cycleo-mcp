@@ -513,7 +513,8 @@ const server = createServer(async (request, response) => {
     const status = error.status || (error instanceof SyntaxError ? 400 : 500);
     if (error instanceof SyntaxError) return sendRpcError(response, null, -32700, 'Parse error', 400);
     if (status === 401) return send(response, 401, { error: { code: error.code, message: error.message } }, { 'www-authenticate': `Bearer resource_metadata="${resource}/.well-known/oauth-protected-resource", scope="cycleo:read"` });
-    const headers = error.retryAfter ? { 'retry-after': String(error.retryAfter) } : {};
+    const retryAfter = error.retryAfter ?? (error.retryAfterMs === undefined ? undefined : Math.ceil(error.retryAfterMs / 1000));
+    const headers = retryAfter ? { 'retry-after': String(retryAfter) } : {};
     if (error instanceof CycleoApiError) return send(response, status, { error: { code: error.code, message: error.message } }, headers);
     return send(response, status, { error: { code: error.code || 'server_error', message: status === 500 ? 'Internal server error' : error.message } }, headers);
   }

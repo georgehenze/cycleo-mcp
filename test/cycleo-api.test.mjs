@@ -19,6 +19,11 @@ before(async () => {
       retryAfterObserved?.();
       return;
     }
+    if (request.url === '/maintenance') {
+      attempts.set('/maintenance', (attempts.get('/maintenance') ?? 0) + 1);
+      response.writeHead(503, { 'content-type': 'application/json', 'retry-after': '300' });
+      return response.end(JSON.stringify({ error: { code: 'maintenance', message: 'Cycleo is in maintenance' } }));
+    }
     if (request.url.startsWith('/flaky')) {
       const seen = (attempts.get(request.url) ?? 0) + 1;
       attempts.set(request.url, seen);
@@ -88,6 +93,14 @@ test('Cycleo API client stops an in-flight request when its signal is aborted', 
     assert.equal(error.code, 'cycleo_cancelled');
     return true;
   });
+});
+
+test('Cycleo API client does not retry maintenance-mode responses', async () => {
+  const client = new CycleoApi({ baseUrl, maxRetries: 2 });
+  const started = Date.now();
+  await assert.rejects(client.get('/maintenance', 'secret'), { status: 503, code: 'maintenance', retryable: false, retryAfterMs: 300000 });
+  assert.equal(attempts.get('/maintenance'), 1);
+  assert.ok(Date.now() - started < 1000, 'maintenance must not wait for Retry-After');
 });
 
 test('Cycleo API client stops Retry-After backoff when its signal is aborted', async () => {

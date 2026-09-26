@@ -90,8 +90,10 @@ export class CycleoApi {
       try { body = raw ? JSON.parse(raw) : null; } catch { body = null; }
       if (!response.ok) {
         const error = body?.error;
+        // Maintenance mode answers 503 with Retry-After: 300 for minutes on
+        // end; retrying only stalls the MCP call, so surface it immediately.
         throw new CycleoApiError(error?.message || `Cycleo API returned HTTP ${response.status}`, response.status, error?.code, {
-          retryable: RETRYABLE_STATUS.has(response.status),
+          retryable: RETRYABLE_STATUS.has(response.status) && error?.code !== 'maintenance',
           retryAfterMs: retryAfterMsFrom(response.headers.get('retry-after'))
         });
       }
